@@ -4,25 +4,12 @@ const zoomInButton = document.getElementById("zoom-in");
 const zoomOutButton = document.getElementById("zoom-out");
 const resetButton = document.getElementById("reset-view");
 const detailsBody = document.getElementById("details-body");
-const editorHelp = document.getElementById("editor-help");
 const clusterTooltip = document.getElementById("cluster-tooltip");
-
-const unitIdInput = document.getElementById("unit-id");
-const clusterInput = document.getElementById("unit-cluster");
-const statusInput = document.getElementById("unit-status");
-const bedroomsInput = document.getElementById("unit-bedrooms");
-const sizeInput = document.getElementById("unit-size");
-
-const saveUnitButton = document.getElementById("save-unit");
-const deleteUnitButton = document.getElementById("delete-unit");
-const exportJsonButton = document.getElementById("export-json");
-const clearAllButton = document.getElementById("clear-all");
 const masterPlan = document.getElementById("master-plan");
 
 const overlay = document.getElementById("cluster-layer");
 const clusterOutlineLayer = document.getElementById("cluster-outline-layer");
 const unitLayer = document.getElementById("unit-layer");
-const STORAGE_KEY = "interactive-map-units-svg-v1";
 
 const state = {
   scale: 1,
@@ -105,15 +92,14 @@ function dragStart(clientX, clientY) {
 }
 
 function dragMove(clientX, clientY) {
-  if (!state.isDragging) {
-    return;
-  }
+  if (!state.isDragging) return;
 
   state.x = state.startOffsetX + (clientX - state.startX);
   state.y = state.startOffsetY + (clientY - state.startY);
-  state.dragMoved = state.dragMoved
-    || Math.abs(clientX - state.startX) > 4
-    || Math.abs(clientY - state.startY) > 4;
+  state.dragMoved =
+    Math.abs(clientX - state.startX) > 4 ||
+    Math.abs(clientY - state.startY) > 4;
+
   applyTransform();
 }
 
@@ -126,63 +112,12 @@ function dragEnd() {
   surface.classList.remove("is-dragging");
 }
 
-function renderClusterOutlines() {
-  clusterOutlineLayer.innerHTML = "";
-  state.clusters.forEach((cluster) => {
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    const isSelected = cluster.id === state.selectedClusterId;
-    path.setAttribute("class", `cluster-outline${isSelected ? " is-selected" : ""}`);
-    path.setAttribute("d", pathFromPoints(cluster.points));
-    path.setAttribute("tabindex", "0");
-    path.setAttribute("role", "button");
-    path.setAttribute("aria-label", cluster.name);
-    path.dataset.clusterId = cluster.id;
-    path.style.setProperty("--cluster-color", cluster.color);
-    path.style.setProperty("--cluster-fill", hexToRgba(cluster.color, 0.035));
-    path.style.setProperty("--cluster-fill-active", hexToRgba(cluster.color, 0.14));
-
-    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-    title.textContent = cluster.name;
-    path.appendChild(title);
-
-    path.addEventListener("mouseenter", (event) => {
-      showClusterTooltip(cluster, event);
-    });
-    path.addEventListener("mouseover", (event) => {
-      showClusterTooltip(cluster, event);
-    });
-    path.addEventListener("mousemove", (event) => {
-      moveClusterTooltip(event);
-    });
-    path.addEventListener("pointermove", (event) => {
-      showClusterTooltip(cluster, event);
-    });
-    path.addEventListener("mouseleave", hideClusterTooltip);
-    path.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (Date.now() - state.lastDragEndedAt < 120) {
-        return;
-      }
-      selectCluster(cluster.id);
-    });
-    path.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        selectCluster(cluster.id);
-      }
-    });
-
-    clusterOutlineLayer.appendChild(path);
-  });
-}
-
 function pathFromPoints(points) {
-  if (!Array.isArray(points) || !points.length) {
-    return "";
-  }
+  if (!Array.isArray(points) || !points.length) return "";
 
   const [firstPoint, ...remainingPoints] = points;
   const lines = remainingPoints.map((point) => `L ${point.x} ${point.y}`).join(" ");
+
   return `M ${firstPoint.x} ${firstPoint.y} ${lines} Z`;
 }
 
@@ -221,21 +156,74 @@ function getClusterDefinitionById(id) {
   return clusterDefinitions.find((cluster) => cluster.id === id);
 }
 
-function fillForm(unit) {
-  if (!unit) {
-    unitIdInput.value = "";
-    clusterInput.selectedIndex = 0;
-    statusInput.selectedIndex = 0;
-    bedroomsInput.value = "";
-    sizeInput.value = "";
-    return;
-  }
+function isValidPoint(point) {
+  return point && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y));
+}
 
-  unitIdInput.value = unit.unitId;
-  clusterInput.value = unit.cluster;
-  statusInput.value = unit.status;
-  bedroomsInput.value = unit.bedrooms || "";
-  sizeInput.value = unit.size || "";
+function hasValidUnitShape(unit) {
+  return (
+    unit &&
+    typeof unit.id === "string" &&
+    typeof unit.unitId === "string" &&
+    Array.isArray(unit.points) &&
+    unit.points.length >= 3
+  );
+}
+
+function normalizeClusters(clusters) {
+  return clusters
+    .map((cluster) => {
+      const definition =
+        getClusterDefinitionById(cluster.id) ||
+        getClusterDefinitionByName(cluster.name);
+
+      if (!definition) return null;
+
+      return {
+        id: definition.id,
+        name: definition.name,
+        color: definition.color,
+        points: Array.isArray(cluster.points)
+          ? cluster.points.filter(isValidPoint).map((point) => ({
+              x: Math.round(Number(point.x) * 100) / 100,
+              y: Math.round(Number(point.y) * 100) / 100,
+            }))
+          : [],
+      };
+    })
+    .filter((cluster) => cluster && cluster.points.length >= 3);
+}
+
+async function loadClusters() {
+  try {
+    const response = await fetch("./data/clusters.json", { cache: "no-store" });
+
+    if (!response.ok) {
+      state.clusters = [];
+      return;
+    }
+
+    const clusters = await response.json();
+    state.clusters = Array.isArray(clusters) ? normalizeClusters(clusters) : [];
+  } catch {
+    state.clusters = [];
+  }
+}
+
+async function loadUnits() {
+  try {
+    const response = await fetch("./data/units.json", { cache: "no-store" });
+
+    if (!response.ok) {
+      state.units = [];
+      return;
+    }
+
+    const units = await response.json();
+    state.units = Array.isArray(units) ? units.filter(hasValidUnitShape) : [];
+  } catch {
+    state.units = [];
+  }
 }
 
 function renderDetails(unit) {
@@ -274,26 +262,22 @@ function renderClusterDetails(cluster) {
   const unitsInCluster = state.units.filter((unit) => unit.cluster === cluster.name);
   const saleCount = unitsInCluster.filter((unit) => unit.status === "sale").length;
   const rentCount = unitsInCluster.filter((unit) => unit.status === "rent").length;
-  const safeName = escapeHtml(cluster.name);
-  const safeMappedCount = escapeHtml(unitsInCluster.length);
-  const safeSaleCount = escapeHtml(saleCount);
-  const safeRentCount = escapeHtml(rentCount);
 
   detailsBody.innerHTML = `
     <p class="details-kicker">Cluster</p>
-    <h3 class="details-title">${safeName}</h3>
+    <h3 class="details-title">${escapeHtml(cluster.name)}</h3>
     <div class="details-list">
       <div class="details-row">
-        <span class="details-label">Mapped units</span>
-        <span class="details-value">${safeMappedCount}</span>
+        <span class="details-label">Available units</span>
+        <span class="details-value">${escapeHtml(unitsInCluster.length)}</span>
       </div>
       <div class="details-row">
         <span class="details-label">For sale</span>
-        <span class="details-value">${safeSaleCount}</span>
+        <span class="details-value">${escapeHtml(saleCount)}</span>
       </div>
       <div class="details-row">
         <span class="details-label">For rent</span>
-        <span class="details-value">${safeRentCount}</span>
+        <span class="details-value">${escapeHtml(rentCount)}</span>
       </div>
     </div>
   `;
@@ -309,13 +293,15 @@ function showClusterTooltip(cluster, event) {
 function moveClusterTooltip(event) {
   const frameRect = frame.getBoundingClientRect();
   const tooltipRect = clusterTooltip.getBoundingClientRect();
+
   const left = Math.min(
     frameRect.width - tooltipRect.width - 12,
-    Math.max(12, event.clientX - frameRect.left + 14),
+    Math.max(12, event.clientX - frameRect.left + 14)
   );
+
   const top = Math.min(
     frameRect.height - tooltipRect.height - 12,
-    Math.max(12, event.clientY - frameRect.top + 14),
+    Math.max(12, event.clientY - frameRect.top + 14)
   );
 
   clusterTooltip.style.left = `${left}px`;
@@ -339,89 +325,58 @@ function handleClusterPointerMove(event) {
   showClusterTooltip(cluster, event);
 }
 
-function saveUnits() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.units));
-}
+function renderClusterOutlines() {
+  clusterOutlineLayer.innerHTML = "";
 
-async function loadSeedClusters() {
-  try {
-    const response = await fetch("./data/clusters.json", { cache: "no-store" });
-    if (!response.ok) {
-      return [];
-    }
+  state.clusters.forEach((cluster) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    const isSelected = cluster.id === state.selectedClusterId;
 
-    const clusters = await response.json();
-    return Array.isArray(clusters) ? normalizeClusters(clusters) : [];
-  } catch {
-    return [];
-  }
-}
+    path.setAttribute("class", `cluster-outline${isSelected ? " is-selected" : ""}`);
+    path.setAttribute("d", pathFromPoints(cluster.points));
+    path.setAttribute("tabindex", "0");
+    path.setAttribute("role", "button");
+    path.setAttribute("aria-label", cluster.name);
+    path.dataset.clusterId = cluster.id;
+    path.style.setProperty("--cluster-color", cluster.color);
+    path.style.setProperty("--cluster-fill", hexToRgba(cluster.color, 0.035));
+    path.style.setProperty("--cluster-fill-active", hexToRgba(cluster.color, 0.14));
 
-async function loadClusters() {
-  state.clusters = await loadSeedClusters();
-}
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent = cluster.name;
+    path.appendChild(title);
 
-function normalizeClusters(clusters) {
-  return clusters
-    .map((cluster) => {
-      const definition = getClusterDefinitionById(cluster.id) || getClusterDefinitionByName(cluster.name);
-      if (!definition) {
-        return null;
+    path.addEventListener("mouseenter", (event) => {
+      showClusterTooltip(cluster, event);
+    });
+
+    path.addEventListener("mousemove", (event) => {
+      moveClusterTooltip(event);
+    });
+
+    path.addEventListener("pointermove", (event) => {
+      showClusterTooltip(cluster, event);
+    });
+
+    path.addEventListener("mouseleave", hideClusterTooltip);
+
+    path.addEventListener("click", (event) => {
+      event.stopPropagation();
+
+      if (Date.now() - state.lastDragEndedAt < 120) return;
+
+      selectCluster(cluster.id);
+    });
+
+    path.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectCluster(cluster.id);
       }
+    });
 
-      return {
-        id: definition.id,
-        name: definition.name,
-        color: definition.color,
-        points: Array.isArray(cluster.points)
-          ? cluster.points.filter(isValidPoint).map((point) => ({
-            x: Math.round(Number(point.x) * 100) / 100,
-            y: Math.round(Number(point.y) * 100) / 100,
-          }))
-          : [],
-      };
-    })
-    .filter((cluster) => cluster && cluster.points.length >= 3);
-}
-
-function isValidPoint(point) {
-  return point && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y));
-}
-
-async function loadSeedUnits() {
-  try {
-    const response = await fetch("./data/units.json", { cache: "no-store" });
-    if (!response.ok) {
-      return [];
-    }
-
-    const units = await response.json();
-    return Array.isArray(units) ? units.filter(hasValidUnitShape) : [];
-  } catch {
-    return [];
-  }
-}
-
-async function loadUnits() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    if (Array.isArray(stored) && stored.length) {
-      state.units = stored.filter(hasValidUnitShape);
-      return;
-    }
-  } catch {
-    state.units = [];
-  }
-
-  state.units = await loadSeedUnits();
-}
-
-function hasValidUnitShape(unit) {
-  return unit
-    && typeof unit.id === "string"
-    && typeof unit.unitId === "string"
-    && Array.isArray(unit.points)
-    && unit.points.length >= 3;
+    clusterOutlineLayer.appendChild(path);
+  });
 }
 
 function renderUnits() {
@@ -432,23 +387,32 @@ function renderUnits() {
 
     const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
     polygon.setAttribute("points", unit.points.map((point) => `${point.x},${point.y}`).join(" "));
-    polygon.setAttribute("class", `unit-polygon status-${unit.status}${unit.id === state.selectedUnitId ? " is-selected" : ""}`);
+    polygon.setAttribute(
+      "class",
+      `unit-polygon status-${unit.status}${unit.id === state.selectedUnitId ? " is-selected" : ""}`
+    );
     polygon.dataset.unitId = unit.id;
+
     polygon.addEventListener("click", (event) => {
       event.stopPropagation();
+
+      if (Date.now() - state.lastDragEndedAt < 120) return;
+
       selectUnit(unit.id);
     });
+
     group.appendChild(polygon);
 
     const centerX = unit.points.reduce((sum, point) => sum + point.x, 0) / unit.points.length;
     const centerY = unit.points.reduce((sum, point) => sum + point.y, 0) / unit.points.length;
+
     const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
     label.setAttribute("class", "unit-label");
     label.setAttribute("x", centerX);
     label.setAttribute("y", centerY);
     label.textContent = unit.unitId;
-    group.appendChild(label);
 
+    group.appendChild(label);
     unitLayer.appendChild(group);
   });
 }
@@ -456,104 +420,35 @@ function renderUnits() {
 function selectUnit(id) {
   state.selectedUnitId = id;
   state.selectedClusterId = null;
+
   const unit = state.units.find((entry) => entry.id === id) || null;
-  fillForm(unit);
+
   renderDetails(unit);
   renderClusterOutlines();
   renderUnits();
-  editorHelp.textContent = "Unit selected. You can update its details and save again.";
 }
 
 function selectCluster(id) {
   const cluster = state.clusters.find((entry) => entry.id === id);
-  if (!cluster) {
-    return;
-  }
+
+  if (!cluster) return;
 
   state.selectedClusterId = id;
   state.selectedUnitId = null;
-  fillForm(null);
-  clusterInput.value = cluster.name;
+
   renderClusterOutlines();
   renderUnits();
   renderClusterDetails(cluster);
-  editorHelp.textContent = `${cluster.name} selected. Hover another boundary to see its name.`;
 }
 
-function saveCurrentUnit() {
-  if (!state.selectedUnitId) {
-    editorHelp.textContent = "Select a unit first.";
-    return;
-  }
-
-  const unitId = unitIdInput.value.trim();
-  if (!unitId) {
-    editorHelp.textContent = "Please enter a unit number first.";
-    return;
-  }
-
-  const existingIndex = state.units.findIndex((entry) => entry.id === state.selectedUnitId);
-  if (existingIndex < 0) {
-    editorHelp.textContent = "The selected unit could not be found.";
-    return;
-  }
-
-  const unit = {
-    ...state.units[existingIndex],
-    unitId,
-    cluster: clusterInput.value,
-    status: statusInput.value,
-    bedrooms: bedroomsInput.value.trim(),
-    size: sizeInput.value.trim(),
-  };
-
-  state.units[existingIndex] = unit;
-  state.selectedUnitId = unit.id;
-  saveUnits();
-  renderUnits();
-  renderDetails(unit);
-  editorHelp.textContent = "Unit details saved in this browser.";
-}
-
-function deleteSelectedUnit() {
-  if (!state.selectedUnitId) {
-    editorHelp.textContent = "Select a unit first.";
-    return;
-  }
-
-  state.units = state.units.filter((unit) => unit.id !== state.selectedUnitId);
-  state.selectedUnitId = null;
-  fillForm(null);
-  saveUnits();
-  renderUnits();
-  renderDetails(null);
-  editorHelp.textContent = "Selected unit deleted.";
-}
-
-function exportUnits() {
-  const blob = new Blob([JSON.stringify(state.units, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "interactive-map-units.json";
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function clearAllUnits() {
-  state.units = [];
-  state.selectedUnitId = null;
-  fillForm(null);
-  saveUnits();
-  renderUnits();
-  renderDetails(null);
-  editorHelp.textContent = "All units cleared from this browser.";
-}
-
-frame.addEventListener("wheel", (event) => {
-  event.preventDefault();
-  zoomBy(event.deltaY < 0 ? 1.12 : 0.9);
-}, { passive: false });
+frame.addEventListener(
+  "wheel",
+  (event) => {
+    event.preventDefault();
+    zoomBy(event.deltaY < 0 ? 1.12 : 0.9);
+  },
+  { passive: false }
+);
 
 frame.addEventListener("mousedown", (event) => {
   dragStart(event.clientX, event.clientY);
@@ -566,19 +461,27 @@ window.addEventListener("mousemove", (event) => {
 window.addEventListener("mouseup", dragEnd);
 window.addEventListener("mouseleave", dragEnd);
 
-frame.addEventListener("touchstart", (event) => {
-  if (event.touches.length === 1) {
-    const touch = event.touches[0];
-    dragStart(touch.clientX, touch.clientY);
-  }
-}, { passive: true });
+frame.addEventListener(
+  "touchstart",
+  (event) => {
+    if (event.touches.length === 1) {
+      const touch = event.touches[0];
+      dragStart(touch.clientX, touch.clientY);
+    }
+  },
+  { passive: true }
+);
 
-frame.addEventListener("touchmove", (event) => {
-  if (event.touches.length === 1 && state.isDragging) {
-    const touch = event.touches[0];
-    dragMove(touch.clientX, touch.clientY);
-  }
-}, { passive: true });
+frame.addEventListener(
+  "touchmove",
+  (event) => {
+    if (event.touches.length === 1 && state.isDragging) {
+      const touch = event.touches[0];
+      dragMove(touch.clientX, touch.clientY);
+    }
+  },
+  { passive: true }
+);
 
 frame.addEventListener("touchend", dragEnd);
 
@@ -586,23 +489,25 @@ zoomInButton.addEventListener("click", () => zoomBy(1.18));
 zoomOutButton.addEventListener("click", () => zoomBy(0.84));
 resetButton.addEventListener("click", resetView);
 
-saveUnitButton.addEventListener("click", saveCurrentUnit);
-deleteUnitButton.addEventListener("click", deleteSelectedUnit);
-exportJsonButton.addEventListener("click", exportUnits);
-clearAllButton.addEventListener("click", clearAllUnits);
 overlay.addEventListener("mousemove", handleClusterPointerMove);
 overlay.addEventListener("pointermove", handleClusterPointerMove);
 overlay.addEventListener("mouseleave", hideClusterTooltip);
+
 window.addEventListener("resize", applyTransform);
-masterPlan.addEventListener("load", applyTransform);
+
+if (masterPlan.complete) {
+  applyTransform();
+} else {
+  masterPlan.addEventListener("load", applyTransform);
+}
 
 async function initialize() {
   await loadClusters();
-  renderClusterOutlines();
   await loadUnits();
+
+  renderClusterOutlines();
   renderUnits();
   renderDetails(null);
-  fillForm(null);
   applyTransform();
 }
 
