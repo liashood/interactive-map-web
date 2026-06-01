@@ -1,33 +1,38 @@
-# Interactive Community Map
+# DAMAC Lagoons Interactive Masterplan
 
-Static web app for browsing DAMAC Lagoons communities on top of the master plan SVG.
+Presentation-ready static website for exploring DAMAC Lagoons communities through a
+tilted 3D masterplan, cinematic focus flights, and a glassmorphism property browser.
 
-## What It Does
+## Features
 
-- Shows the master plan map from `assets/master-plan.svg`
-- Draws mapped community cluster boundaries from `data/clusters.json`
-- Shows the cluster name on hover
-- Opens cluster details when a boundary is clicked
-- Keeps `data/units.json` ready for future sale/rent unit data
+- Uses the supplied Lagoons presentation image as a Three.js texture.
+- Renders all 11 mapped communities as lightweight 3D beacons and boundary lines.
+- Converts the original SVG trace coordinates into positions on the updated image.
+- Animates the camera into a selected community from the map or sidebar.
+- Filters communities by search query and townhouse or villa inventory.
+- Shows live community summaries from `data/cluster-inventory.json`.
+- Supports shareable URLs such as `?community=venice&type=Villa&q=ve`.
+- Falls back to the full static masterplan and working sidebar if WebGL is unavailable.
 
 ## Run Locally
 
-Open `index.html` directly in a browser, or serve the folder with any static file server.
-
-Example:
+Serve the folder with any static file server:
 
 ```bash
-npx serve .
+python3 -m http.server 4173
 ```
 
-## Deploy On GitHub Pages
+Then open `http://127.0.0.1:4173`.
 
-1. Create a new GitHub repository.
-2. Push this project to the repository.
-3. In GitHub, open **Settings > Pages**.
-4. Set **Source** to **Deploy from a branch**.
-5. Select the `main` branch and `/ (root)`.
-6. Save, then wait for GitHub to publish the site.
+## Project Structure
 
-The published app will load from `index.html`.
+- `index.html`: application shell and glass interface.
+- `styles.css`: responsive layout and visual design.
+- `app.js`: Three.js scene, coordinate conversion, filters, details, and camera flights.
+- `assets/damac-lagoons-masterplan.png`: supplied presentation masterplan used by the 3D plane.
+- `assets/vendor/`: pinned local copies of Three.js r128 and OrbitControls.
+- `data/clusters.json`: traced cluster boundaries in the original SVG coordinate space.
+- `data/cluster-inventory.json`: community inventory summaries.
+- `data/units.json`: reserved for future plot-level polygons.
 
+No API keys are required.
