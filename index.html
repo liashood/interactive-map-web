@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Community Interactive Map Editor</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="info-panel">
+      <div class="brand-block">
+        <p class="eyebrow">Interactive Community Map</p>
+        <h1>Map Editor</h1>
+        <p class="intro">
+          Select units on the plan, then update their cluster, status, and details.
+        </p>
+      </div>
+
+      <div class="editor-card">
+        <h2>Editor</h2>
+        <label class="field">
+          <span>Unit Number</span>
+          <input id="unit-id" type="text" placeholder="BL465">
+        </label>
+        <label class="field">
+          <span>Cluster</span>
+          <select id="unit-cluster">
+            <option value="Portofino">Portofino</option>
+            <option value="Venice">Venice</option>
+            <option value="Morocco">Morocco</option>
+            <option value="Santorini">Santorini</option>
+            <option value="Marbella">Marbella</option>
+            <option value="Montecarlo">Montecarlo</option>
+            <option value="Malta">Malta</option>
+            <option value="Nice">Nice</option>
+            <option value="Costa Brava">Costa Brava</option>
+            <option value="Mykonos">Mykonos</option>
+            <option value="Ibiza">Ibiza</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Status</span>
+          <select id="unit-status">
+            <option value="sale">For sale</option>
+            <option value="rent">For rent</option>
+            <option value="none">No information</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Bedrooms</span>
+          <input id="unit-bedrooms" type="text" placeholder="5 bedrooms">
+        </label>
+        <label class="field">
+          <span>Size</span>
+          <input id="unit-size" type="text" placeholder="5400 sqft">
+        </label>
+
+        <div class="actions">
+          <button id="save-unit" class="action-button success" type="button">Save Unit</button>
+          <button id="delete-unit" class="action-button danger" type="button">Delete Selected</button>
+        </div>
+
+        <div class="actions">
+          <button id="export-json" class="action-button" type="button">Export Data</button>
+          <button id="clear-all" class="action-button danger" type="button">Clear All</button>
+        </div>
+
+        <p class="helper-text" id="editor-help">
+          Select a unit on the map to edit its details.
+        </p>
+      </div>
+
+      <div class="legend">
+        <h2>Status Colors</h2>
+        <div class="legend-item">
+          <span class="legend-swatch legend-rent"></span>
+          <span>Available for rent</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-swatch legend-sale"></span>
+          <span>Available for sale</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-swatch legend-none"></span>
+          <span>No information</span>
+        </div>
+      </div>
+
+      <div class="details-card" id="details-card">
+        <h2>Selection Details</h2>
+        <div class="details-body" id="details-body">
+          <p class="details-empty">
+            No unit selected yet.
+          </p>
+        </div>
+      </div>
+    </aside>
+
+    <main class="map-stage">
+      <div class="stage-toolbar">
+        <button class="tool-button" id="zoom-in" type="button" aria-label="Zoom in">+</button>
+        <button class="tool-button" id="zoom-out" type="button" aria-label="Zoom out">-</button>
+        <button class="tool-button" id="reset-view" type="button" aria-label="Reset view">Reset</button>
+      </div>
+
+      <div class="map-frame" id="map-frame">
+        <div class="map-surface" id="map-surface">
+          <div class="map-glow"></div>
+          <img
+            id="master-plan"
+            src="./assets/master-plan.svg"
+            alt="Community master plan"
+            draggable="false"
+          >
+
+          <svg
+            class="cluster-layer"
+            id="cluster-layer"
+            viewBox="0 0 841.89 595.276"
+            preserveAspectRatio="xMidYMid meet"
+            aria-label="Community clusters and units"
+          >
+            <g id="cluster-outline-layer"></g>
+            <g id="unit-layer"></g>
+          </svg>
+        </div>
+        <div class="cluster-tooltip" id="cluster-tooltip" aria-hidden="true"></div>
+      </div>
+    </main>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
