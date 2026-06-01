@@ -22,6 +22,7 @@ const state = {
   lastDragEndedAt: 0,
   clusters: [],
   units: [],
+  clusterInventory: [],
   selectedUnitId: null,
   selectedClusterId: null,
   startX: 0,
@@ -43,6 +44,46 @@ const clusterDefinitions = [
   { id: "mykonos", name: "Mykonos", color: "#ec4899" },
   { id: "ibiza", name: "Ibiza", color: "#84cc16" },
 ];
+
+function escapeHtml(value) {
+  const replacements = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  };
+
+  return String(value ?? "").replace(/[&<>"']/g, (character) => replacements[character]);
+}
+
+function getStatusLabel(status) {
+  if (status === "sale") return "For sale";
+  if (status === "rent") return "For rent";
+  return "No information";
+}
+
+function getClusterDefinitionByName(name) {
+  return clusterDefinitions.find((cluster) => cluster.name === name);
+}
+
+function getClusterDefinitionById(id) {
+  return clusterDefinitions.find((cluster) => cluster.id === id);
+}
+
+function isValidPoint(point) {
+  return point && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y));
+}
+
+function hasValidUnitShape(unit) {
+  return (
+    unit &&
+    typeof unit.id === "string" &&
+    typeof unit.unitId === "string" &&
+    Array.isArray(unit.points) &&
+    unit.points.length >= 3
+  );
+}
 
 function clampPan() {
   const frameRect = frame.getBoundingClientRect();
@@ -130,46 +171,6 @@ function hexToRgba(hex, opacity) {
   return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
 }
 
-function getStatusLabel(status) {
-  if (status === "sale") return "For sale";
-  if (status === "rent") return "For rent";
-  return "No information";
-}
-
-function escapeHtml(value) {
-  const replacements = {
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  };
-
-  return String(value ?? "").replace(/[&<>"']/g, (character) => replacements[character]);
-}
-
-function getClusterDefinitionByName(name) {
-  return clusterDefinitions.find((cluster) => cluster.name === name);
-}
-
-function getClusterDefinitionById(id) {
-  return clusterDefinitions.find((cluster) => cluster.id === id);
-}
-
-function isValidPoint(point) {
-  return point && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y));
-}
-
-function hasValidUnitShape(unit) {
-  return (
-    unit &&
-    typeof unit.id === "string" &&
-    typeof unit.unitId === "string" &&
-    Array.isArray(unit.points) &&
-    unit.points.length >= 3
-  );
-}
-
 function normalizeClusters(clusters) {
   return clusters
     .map((cluster) => {
@@ -197,7 +198,6 @@ function normalizeClusters(clusters) {
 async function loadClusters() {
   try {
     const response = await fetch("./data/clusters.json", { cache: "no-store" });
-
     if (!response.ok) {
       state.clusters = [];
       return;
@@ -213,7 +213,6 @@ async function loadClusters() {
 async function loadUnits() {
   try {
     const response = await fetch("./data/units.json", { cache: "no-store" });
-
     if (!response.ok) {
       state.units = [];
       return;
@@ -226,57 +225,149 @@ async function loadUnits() {
   }
 }
 
+async function loadClusterInventory() {
+  try {
+    const response = await fetch("./data/cluster-inventory.json", { cache: "no-store" });
+    if (!response.ok) {
+      state.clusterInventory = [];
+      return;
+    }
+
+    const inventory = await response.json();
+    state.clusterInventory = Array.isArray(inventory) ? inventory : [];
+  } catch {
+    state.clusterInventory = [];
+  }
+}
+
+function findClusterInventory(clusterName) {
+  return state.clusterInventory.find((item) => {
+    const name = item.cluster || item.name || item.clusterName;
+    return String(name).toLowerCase() === String(clusterName).toLowerCase();
+  });
+}
+
+function formatInventoryRows(inventory) {
+  if (!inventory) return "";
+
+  const ignoredKeys = new Set(["cluster", "name", "clusterName", "units"]);
+  const rows = [];
+
+  Object.entries(inventory).forEach(([key, value]) => {
+    if (ignoredKeys.has(key)) return;
+    if (Array.isArray(value)) {
+  rows.push(`
+    <div class="details-row">
+      <span class="details-label">${escapeHtml(formatLabel(key))}</span>
+      <span class="details-value">${escapeHtml(value.length)}</span>
+    </div>
+  `);
+  return;
+}
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      rows.push(`
+        <div class="details-row">
+          <span class="details-label">${escapeHtml(formatLabel(key))}</span>
+          <span class="details-value"></span>
+        </div>
+      `);
+
+      Object.entries(value).forEach(([subKey, subValue]) => {
+        rows.push(`
+          <div class="details-row">
+            <span class="details-label">- ${escapeHtml(formatLabel(subKey))}</span>
+            <span class="details-value">${escapeHtml(subValue)}</span>
+          </div>
+        `);
+      });
+
+      return;
+    }
+
+    rows.push(`
+      <div class="details-row">
+        <span class="details-label">${escapeHtml(formatLabel(key))}</span>
+        <span class="details-value">${escapeHtml(value)}</span>
+      </div>
+    `);
+  });
+
+  return rows.join("");
+}
+
+function formatLabel(key) {
+  return String(key)
+    .replace(/([A-Z])/g, " $1")
+    .replace(/[_-]/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .trim();
+}
+
 function renderDetails(unit) {
   if (!unit) {
     detailsBody.innerHTML = '<p class="details-empty">No unit selected yet.</p>';
     return;
   }
 
-  const safeCluster = escapeHtml(unit.cluster);
-  const safeUnitId = escapeHtml(unit.unitId);
-  const safeStatus = escapeHtml(getStatusLabel(unit.status));
-  const safeBedrooms = escapeHtml(unit.bedrooms || "-");
-  const safeSize = escapeHtml(unit.size || "-");
-
   detailsBody.innerHTML = `
-    <p class="details-kicker">${safeCluster}</p>
-    <h3 class="details-title">${safeUnitId}</h3>
+    <p class="details-kicker">${escapeHtml(unit.cluster)}</p>
+    <h3 class="details-title">${escapeHtml(unit.unitId)}</h3>
     <div class="details-list">
       <div class="details-row">
         <span class="details-label">Status</span>
-        <span class="details-value">${safeStatus}</span>
+        <span class="details-value">${escapeHtml(getStatusLabel(unit.status))}</span>
       </div>
       <div class="details-row">
         <span class="details-label">Bedrooms</span>
-        <span class="details-value">${safeBedrooms}</span>
+        <span class="details-value">${escapeHtml(unit.bedrooms || "-")}</span>
       </div>
       <div class="details-row">
         <span class="details-label">Size</span>
-        <span class="details-value">${safeSize}</span>
+        <span class="details-value">${escapeHtml(unit.size || "-")}</span>
       </div>
+      ${
+        unit.price
+          ? `<div class="details-row">
+              <span class="details-label">Price</span>
+              <span class="details-value">${escapeHtml(unit.price)}</span>
+            </div>`
+          : ""
+      }
     </div>
   `;
 }
 
 function renderClusterDetails(cluster) {
-  const unitsInCluster = state.units.filter((unit) => unit.cluster === cluster.name);
-  const saleCount = unitsInCluster.filter((unit) => unit.status === "sale").length;
-  const rentCount = unitsInCluster.filter((unit) => unit.status === "rent").length;
+  const inventory = findClusterInventory(cluster.name);
+  const mappedUnits = state.units.filter((unit) => unit.cluster === cluster.name);
+  const saleCount = mappedUnits.filter((unit) => unit.status === "sale").length;
+  const rentCount = mappedUnits.filter((unit) => unit.status === "rent").length;
+
+  if (inventory) {
+    detailsBody.innerHTML = `
+      <p class="details-kicker">Cluster Inventory</p>
+      <h3 class="details-title">${escapeHtml(cluster.name)}</h3>
+      <div class="details-list">
+        ${formatInventoryRows(inventory)}
+      </div>
+    `;
+    return;
+  }
 
   detailsBody.innerHTML = `
     <p class="details-kicker">Cluster</p>
     <h3 class="details-title">${escapeHtml(cluster.name)}</h3>
     <div class="details-list">
       <div class="details-row">
-        <span class="details-label">Available units</span>
-        <span class="details-value">${escapeHtml(unitsInCluster.length)}</span>
+        <span class="details-label">Mapped Units</span>
+        <span class="details-value">${escapeHtml(mappedUnits.length)}</span>
       </div>
       <div class="details-row">
-        <span class="details-label">For sale</span>
+        <span class="details-label">For Sale</span>
         <span class="details-value">${escapeHtml(saleCount)}</span>
       </div>
       <div class="details-row">
-        <span class="details-label">For rent</span>
+        <span class="details-label">For Rent</span>
         <span class="details-value">${escapeHtml(rentCount)}</span>
       </div>
     </div>
@@ -346,25 +437,14 @@ function renderClusterOutlines() {
     title.textContent = cluster.name;
     path.appendChild(title);
 
-    path.addEventListener("mouseenter", (event) => {
-      showClusterTooltip(cluster, event);
-    });
-
-    path.addEventListener("mousemove", (event) => {
-      moveClusterTooltip(event);
-    });
-
-    path.addEventListener("pointermove", (event) => {
-      showClusterTooltip(cluster, event);
-    });
-
+    path.addEventListener("mouseenter", (event) => showClusterTooltip(cluster, event));
+    path.addEventListener("mousemove", (event) => moveClusterTooltip(event));
+    path.addEventListener("pointermove", (event) => showClusterTooltip(cluster, event));
     path.addEventListener("mouseleave", hideClusterTooltip);
 
     path.addEventListener("click", (event) => {
       event.stopPropagation();
-
       if (Date.now() - state.lastDragEndedAt < 120) return;
-
       selectCluster(cluster.id);
     });
 
@@ -395,9 +475,7 @@ function renderUnits() {
 
     polygon.addEventListener("click", (event) => {
       event.stopPropagation();
-
       if (Date.now() - state.lastDragEndedAt < 120) return;
-
       selectUnit(unit.id);
     });
 
@@ -430,7 +508,6 @@ function selectUnit(id) {
 
 function selectCluster(id) {
   const cluster = state.clusters.find((entry) => entry.id === id);
-
   if (!cluster) return;
 
   state.selectedClusterId = id;
@@ -504,6 +581,7 @@ if (masterPlan.complete) {
 async function initialize() {
   await loadClusters();
   await loadUnits();
+  await loadClusterInventory();
 
   renderClusterOutlines();
   renderUnits();
