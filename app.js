@@ -1,49 +1,249 @@
-const frame = document.getElementById("map-frame");
-const surface = document.getElementById("map-surface");
+const viewer = document.getElementById("viewer");
 const zoomInButton = document.getElementById("zoom-in");
 const zoomOutButton = document.getElementById("zoom-out");
 const resetButton = document.getElementById("reset-view");
+const detailsCard = document.getElementById("details-card");
 const detailsBody = document.getElementById("details-body");
-const clusterTooltip = document.getElementById("cluster-tooltip");
-const masterPlan = document.getElementById("master-plan");
+const detailsCloseButton = document.getElementById("details-close");
+const communityList = document.getElementById("community-list");
+const communityCount = document.getElementById("community-count");
+const communityTotal = document.getElementById("community-total");
+const residenceTotal = document.getElementById("residence-total");
+const communitySearch = document.getElementById("community-search");
 
-const overlay = document.getElementById("cluster-layer");
-const clusterOutlineLayer = document.getElementById("cluster-outline-layer");
-const unitLayer = document.getElementById("unit-layer");
+const TEXTURE = {
+  width: 1448,
+  height: 1086,
+  planeWidth: 680,
+  planeHeight: 538,
+  crop: {
+    left: 220,
+    top: 60,
+    right: 1420,
+    bottom: 1010,
+  },
+};
+
+// The supplied presentation image is a larger render of the traced SVG plate.
+const PLATE_TRANSFORM = {
+  scaleX: 1.78,
+  scaleY: 1.91,
+  offsetX: 4,
+  offsetY: -80,
+};
+
+const DEFAULT_VIEW = {
+  position: new THREE.Vector3(42, 600, 730),
+  target: new THREE.Vector3(42, 0, 8),
+};
 
 const state = {
-  scale: 1,
-  x: 0,
-  y: 0,
-  minScale: 1,
-  maxScale: 12,
-  isDragging: false,
-  dragMoved: false,
-  lastDragEndedAt: 0,
   clusters: [],
-  units: [],
-  clusterInventory: [],
-  selectedUnitId: null,
+  inventory: [],
   selectedClusterId: null,
-  startX: 0,
-  startY: 0,
-  startOffsetX: 0,
-  startOffsetY: 0,
+  hoveredClusterId: null,
+  query: "",
+  propertyFilter: "all",
+  animationFrame: null,
 };
 
 const clusterDefinitions = [
-  { id: "portofino", name: "Portofino", color: "#a78bfa" },
-  { id: "venice", name: "Venice", color: "#f97316" },
-  { id: "morocco", name: "Morocco", color: "#fb7185" },
-  { id: "santorini", name: "Santorini", color: "#06b6d4" },
-  { id: "marbella", name: "Marbella", color: "#eab308" },
-  { id: "montecarlo", name: "Montecarlo", color: "#14b8a6" },
-  { id: "malta", name: "Malta", color: "#ef4444" },
-  { id: "nice", name: "Nice", color: "#38bdf8" },
-  { id: "costa-brava", name: "Costa Brava", color: "#22c55e" },
-  { id: "mykonos", name: "Mykonos", color: "#ec4899" },
-  { id: "ibiza", name: "Ibiza", color: "#84cc16" },
+  {
+    id: "santorini",
+    number: 1,
+    name: "Santorini",
+    color: "#79b9c1",
+    description: "A serene island-inspired neighbourhood with a relaxed waterfront rhythm.",
+  },
+  {
+    id: "costa-brava",
+    number: 2,
+    name: "Costa Brava",
+    color: "#70aa69",
+    description: "An active Mediterranean community shaped around open spaces and family living.",
+  },
+  {
+    id: "portofino",
+    number: 3,
+    name: "Portofino",
+    color: "#df9636",
+    description: "A vibrant villa destination with colourful character and a resort-like setting.",
+  },
+  {
+    id: "nice",
+    number: 4,
+    name: "Nice",
+    color: "#d9c56f",
+    description: "A bright, easy-going enclave designed for an elegant coastal lifestyle.",
+  },
+  {
+    id: "venice",
+    number: 5,
+    name: "Venice",
+    color: "#bd6033",
+    description: "A distinctive lagoon district where water channels weave through statement homes.",
+  },
+  {
+    id: "malta",
+    number: 6,
+    name: "Malta",
+    color: "#d71b24",
+    description: "A family-led neighbourhood with landscaped routes and a lively community spirit.",
+  },
+  {
+    id: "marbella",
+    number: 7,
+    name: "Marbella",
+    color: "#5d9b4f",
+    description: "A green Mediterranean-inspired cluster with a calm residential atmosphere.",
+  },
+  {
+    id: "montecarlo",
+    number: 8,
+    name: "Monte Carlo",
+    color: "#71916e",
+    description: "A refined enclave balancing contemporary homes with generous landscaped edges.",
+  },
+  {
+    id: "mykonos",
+    number: 9,
+    name: "Mykonos",
+    color: "#6f9078",
+    description: "A laid-back island cluster with intimate streets and an airy village feel.",
+  },
+  {
+    id: "ibiza",
+    number: 10,
+    name: "Ibiza",
+    color: "#4ca85c",
+    description: "An energetic community inspired by relaxed island living and outdoor connection.",
+  },
+  {
+    id: "morocco",
+    number: 11,
+    name: "Morocco",
+    color: "#a6963c",
+    description: "A dramatic lagoon setting with a rich architectural mix and winding waterfront plots.",
+  },
 ];
+
+let renderer;
+let scene;
+let camera;
+let controls;
+let raycaster;
+let pointer;
+let hasWebgl = false;
+const interactiveMeshes = [];
+const markerById = new Map();
+let hoverRing;
+let selectedRing;
+
+function initializeScene() {
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(42, 1, 0.5, 1800);
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    raycaster = new THREE.Raycaster();
+    pointer = new THREE.Vector2();
+
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.setClearColor(0xe6eee7, 0.15);
+    viewer.appendChild(renderer.domElement);
+    viewer.classList.add("has-webgl");
+
+    camera.position.copy(DEFAULT_VIEW.position);
+    controls.target.copy(DEFAULT_VIEW.target);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    controls.minDistance = 170;
+    controls.maxDistance = 1200;
+    controls.maxPolarAngle = Math.PI * 0.48;
+    controls.minPolarAngle = Math.PI * 0.16;
+    controls.update();
+
+    scene.fog = new THREE.Fog(0xe5eee8, 760, 1350);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.84);
+    const hemisphereLight = new THREE.HemisphereLight(0xf7fffd, 0xb8c9bd, 0.72);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    directionalLight.position.set(-260, 480, 280);
+    directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.set(1024, 1024);
+    directionalLight.shadow.camera.left = -460;
+    directionalLight.shadow.camera.right = 460;
+    directionalLight.shadow.camera.top = 420;
+    directionalLight.shadow.camera.bottom = -420;
+    scene.add(ambientLight, hemisphereLight, directionalLight);
+
+    const slab = new THREE.Mesh(
+      new THREE.BoxGeometry(TEXTURE.planeWidth + 12, 6, TEXTURE.planeHeight + 12),
+      new THREE.MeshStandardMaterial({
+        color: 0xe9e3d6,
+        roughness: 0.9,
+        metalness: 0,
+      })
+    );
+    slab.position.y = -4;
+    slab.receiveShadow = true;
+    scene.add(slab);
+
+    const mapTexture = new THREE.TextureLoader().load("./assets/damac-lagoons-masterplan.png");
+    mapTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    mapTexture.encoding = THREE.sRGBEncoding;
+    mapTexture.offset.set(
+      TEXTURE.crop.left / TEXTURE.width,
+      (TEXTURE.height - TEXTURE.crop.bottom) / TEXTURE.height
+    );
+    mapTexture.repeat.set(
+      (TEXTURE.crop.right - TEXTURE.crop.left) / TEXTURE.width,
+      (TEXTURE.crop.bottom - TEXTURE.crop.top) / TEXTURE.height
+    );
+
+    const masterplan = new THREE.Mesh(
+      new THREE.PlaneGeometry(TEXTURE.planeWidth, TEXTURE.planeHeight),
+      new THREE.MeshBasicMaterial({
+        map: mapTexture,
+        color: 0xffffff,
+      })
+    );
+    masterplan.rotation.x = -Math.PI / 2;
+    masterplan.receiveShadow = true;
+    scene.add(masterplan);
+
+    hoverRing = createFocusRing(17, 23, 0x62b8be, 0.5);
+    selectedRing = createFocusRing(21, 29, 0xffffff, 0.76);
+    scene.add(hoverRing, selectedRing);
+    return true;
+  } catch (error) {
+    console.warn("WebGL is unavailable. Showing the static masterplan fallback.", error);
+    viewer.classList.add("is-static");
+    document.body.classList.add("is-static-map");
+    return false;
+  }
+}
+
+function createFocusRing(innerRadius, outerRadius, color, opacity) {
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(innerRadius, outerRadius, 72),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+  );
+
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 2.5;
+  ring.visible = false;
+  return ring;
+}
 
 function escapeHtml(value) {
   const replacements = {
@@ -57,536 +257,593 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => replacements[character]);
 }
 
-function getStatusLabel(status) {
-  if (status === "sale") return "For sale";
-  if (status === "rent") return "For rent";
-  return "No information";
+function normalizeName(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 }
 
-function getClusterDefinitionByName(name) {
-  return clusterDefinitions.find((cluster) => cluster.name === name);
+function formatNumber(value) {
+  return new Intl.NumberFormat("en-US").format(Number(value) || 0);
 }
 
-function getClusterDefinitionById(id) {
-  return clusterDefinitions.find((cluster) => cluster.id === id);
+function computeCentroid(points) {
+  const center = points.reduce(
+    (total, point) => ({
+      x: total.x + Number(point.x || 0),
+      y: total.y + Number(point.y || 0),
+    }),
+    { x: 0, y: 0 }
+  );
+
+  return {
+    x: center.x / points.length,
+    y: center.y / points.length,
+  };
 }
 
-function isValidPoint(point) {
-  return point && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y));
-}
+function sourcePointToWorld(point, height = 0) {
+  const textureX = Number(point.x) * PLATE_TRANSFORM.scaleX + PLATE_TRANSFORM.offsetX;
+  const textureY = Number(point.y) * PLATE_TRANSFORM.scaleY + PLATE_TRANSFORM.offsetY;
+  const cropWidth = TEXTURE.crop.right - TEXTURE.crop.left;
+  const cropHeight = TEXTURE.crop.bottom - TEXTURE.crop.top;
 
-function hasValidUnitShape(unit) {
-  return (
-    unit &&
-    typeof unit.id === "string" &&
-    typeof unit.unitId === "string" &&
-    Array.isArray(unit.points) &&
-    unit.points.length >= 3
+  return new THREE.Vector3(
+    ((textureX - TEXTURE.crop.left) / cropWidth - 0.5) * TEXTURE.planeWidth,
+    height,
+    ((textureY - TEXTURE.crop.top) / cropHeight - 0.5) * TEXTURE.planeHeight
   );
 }
 
-function clampPan() {
-  const frameRect = frame.getBoundingClientRect();
-  const baseWidth = masterPlan.clientWidth;
-  const baseHeight = masterPlan.clientHeight;
+function getClusterPosition(cluster, height = 0) {
+  return sourcePointToWorld(computeCentroid(cluster.points), height);
+}
 
-  if (!baseWidth || !baseHeight) {
-    state.x = 0;
-    state.y = 0;
+function createBoundary(cluster) {
+  const points = cluster.points.map((point) => sourcePointToWorld(point, 2.1));
+  const geometry = new THREE.BufferGeometry().setFromPoints([...points, points[0]]);
+  const material = new THREE.LineBasicMaterial({
+    color: cluster.color,
+    transparent: true,
+    opacity: 0.52,
+  });
+
+  scene.add(new THREE.Line(geometry, material));
+}
+
+function createPinTexture(cluster) {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  const size = 128;
+  canvas.width = size;
+  canvas.height = size;
+
+  context.beginPath();
+  context.arc(size / 2, size / 2, 46, 0, Math.PI * 2);
+  context.fillStyle = cluster.color;
+  context.fill();
+  context.lineWidth = 8;
+  context.strokeStyle = "rgba(255,255,255,0.95)";
+  context.stroke();
+  context.fillStyle = "#ffffff";
+  context.font = "700 48px Arial";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(cluster.number, size / 2, size / 2 + 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.encoding = THREE.sRGBEncoding;
+  return texture;
+}
+
+function createClusterBeacon(cluster) {
+  const group = new THREE.Group();
+  const position = getClusterPosition(cluster);
+  const color = new THREE.Color(cluster.color);
+  const baseMaterial = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.36,
+    metalness: 0.08,
+    transparent: true,
+    opacity: 0.88,
+  });
+
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(12, 14, 3, 40), baseMaterial);
+  base.position.y = 2.4;
+  base.castShadow = true;
+  group.add(base);
+
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 2, 15, 20), baseMaterial);
+  mast.position.y = 10.5;
+  mast.castShadow = true;
+  group.add(mast);
+
+  const halo = new THREE.Mesh(
+    new THREE.TorusGeometry(16, 1.3, 10, 64),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.62,
+    })
+  );
+  halo.rotation.x = Math.PI / 2;
+  halo.position.y = 3.8;
+  group.add(halo);
+
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: createPinTexture(cluster),
+      transparent: true,
+      depthTest: false,
+    })
+  );
+  sprite.position.y = 26;
+  sprite.scale.set(21, 21, 1);
+  sprite.renderOrder = 10;
+  group.add(sprite);
+
+  const hitArea = new THREE.Mesh(
+    new THREE.CylinderGeometry(19, 19, 24, 32),
+    new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    })
+  );
+  hitArea.position.y = 11;
+  hitArea.userData.clusterId = cluster.id;
+  group.add(hitArea);
+  interactiveMeshes.push(hitArea);
+
+  group.position.copy(position);
+  group.userData.clusterId = cluster.id;
+  markerById.set(cluster.id, group);
+  scene.add(group);
+}
+
+function createSceneCommunities() {
+  if (!hasWebgl) return;
+
+  state.clusters.forEach((cluster) => {
+    createBoundary(cluster);
+    createClusterBeacon(cluster);
+  });
+}
+
+function findClusterInventory(clusterName) {
+  const normalizedName = normalizeName(clusterName);
+  return state.inventory.find((item) => {
+    const name = item.cluster || item.name || item.clusterName;
+    return normalizeName(name) === normalizedName;
+  });
+}
+
+function getPrimaryCategory(inventory) {
+  if (!inventory?.categories) return "Community";
+
+  return Object.entries(inventory.categories)
+    .sort(([, countA], [, countB]) => countB - countA)[0]?.[0] || "Community";
+}
+
+function getCategoryCount(inventory) {
+  return Object.keys(inventory?.categories || {}).length;
+}
+
+function getBedroomLabel(inventory) {
+  const counts = Object.keys(inventory?.bedrooms || {})
+    .map((label) => Number.parseInt(label, 10))
+    .filter(Number.isFinite);
+
+  if (!counts.length) return "Mixed";
+  if (counts.length === 1) return `${counts[0]} BR`;
+  return `${Math.min(...counts)}-${Math.max(...counts)} BR`;
+}
+
+function renderDetails(cluster) {
+  if (!cluster) {
+    detailsCard.classList.remove("is-active");
     return;
   }
 
-  const scaledWidth = baseWidth * state.scale;
-  const scaledHeight = baseHeight * state.scale;
-  const maxOffsetX = Math.max(0, (scaledWidth - frameRect.width) / 2);
-  const maxOffsetY = Math.max(0, (scaledHeight - frameRect.height) / 2);
+  const inventory = findClusterInventory(cluster.name);
+  const categoryEntries = Object.entries(inventory?.categories || {});
+  const styleEntries = Object.entries(inventory?.typeBreakdown || {})
+    .sort(([, countA], [, countB]) => countB - countA)
+    .slice(0, 3);
+  const listRows = [
+    ...categoryEntries.map(([label, value]) => [label, `${formatNumber(value)} residences`]),
+    ...styleEntries.map(([label, value]) => [label, formatNumber(value)]),
+  ];
 
-  state.x = Math.min(maxOffsetX, Math.max(-maxOffsetX, state.x));
-  state.y = Math.min(maxOffsetY, Math.max(-maxOffsetY, state.y));
+  detailsBody.innerHTML = `
+    <p class="details-kicker">Community ${escapeHtml(cluster.number)}</p>
+    <h2 class="details-title">${escapeHtml(cluster.name)}</h2>
+    <p class="details-description">${escapeHtml(cluster.description)}</p>
+
+    <div class="details-highlight">
+      <div class="highlight-cell">
+        <strong>${escapeHtml(formatNumber(inventory?.totalUnits))}</strong>
+        <span>Residences</span>
+      </div>
+      <div class="highlight-cell">
+        <strong>${escapeHtml(getCategoryCount(inventory))}</strong>
+        <span>Home types</span>
+      </div>
+      <div class="highlight-cell">
+        <strong>${escapeHtml(getBedroomLabel(inventory))}</strong>
+        <span>Bedroom mix</span>
+      </div>
+    </div>
+
+    <div class="details-list">
+      ${listRows
+        .slice(0, 5)
+        .map(
+          ([label, value]) => `
+            <div class="details-row">
+              <span class="details-label">${escapeHtml(label)}</span>
+              <span class="details-value">${escapeHtml(value)}</span>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+
+    <button class="details-action" id="details-reset-view" type="button">
+      Return to full masterplan
+    </button>
+  `;
+
+  document.getElementById("details-reset-view").addEventListener("click", resetView);
+  detailsCard.classList.add("is-active");
 }
 
-function applyTransform() {
-  clampPan();
-  surface.style.transform = `translate(calc(-50% + ${state.x}px), calc(-50% + ${state.y}px)) scale(${state.scale})`;
+function getFilteredClusters() {
+  const query = normalizeName(state.query);
+
+  return state.clusters.filter((cluster) => {
+    const inventory = findClusterInventory(cluster.name);
+    const hasPropertyType =
+      state.propertyFilter === "all" ||
+      Object.prototype.hasOwnProperty.call(inventory?.categories || {}, state.propertyFilter);
+    const matchesQuery = !query || normalizeName(cluster.name).includes(query);
+
+    return hasPropertyType && matchesQuery;
+  });
 }
 
-function zoomBy(factor) {
-  state.scale = Math.min(state.maxScale, Math.max(state.minScale, state.scale * factor));
-  applyTransform();
+function renderCommunityList() {
+  const clusters = getFilteredClusters();
+  communityCount.textContent = `${clusters.length} ${clusters.length === 1 ? "place" : "places"}`;
+
+  if (!clusters.length) {
+    communityList.innerHTML = `
+      <p class="community-empty">
+        No communities match that search. Try another name or property type.
+      </p>
+    `;
+    return;
+  }
+
+  communityList.innerHTML = clusters
+    .map((cluster) => {
+      const inventory = findClusterInventory(cluster.name);
+      const isSelected = cluster.id === state.selectedClusterId;
+
+      return `
+        <button
+          class="community-item${isSelected ? " is-selected" : ""}"
+          type="button"
+          data-cluster-id="${escapeHtml(cluster.id)}"
+          style="--cluster-color: ${escapeHtml(cluster.color)}"
+        >
+          <span class="community-item-number">${escapeHtml(cluster.number)}</span>
+          <span class="community-item-copy">
+            <strong>${escapeHtml(cluster.name)}</strong>
+            <span>${escapeHtml(getPrimaryCategory(inventory))} &middot; ${escapeHtml(getBedroomLabel(inventory))}</span>
+          </span>
+          <span class="community-item-total">${escapeHtml(formatNumber(inventory?.totalUnits))}</span>
+        </button>
+      `;
+    })
+    .join("");
+
+  communityList.querySelectorAll(".community-item").forEach((button) => {
+    button.addEventListener("mouseenter", () => updateHoverState(button.dataset.clusterId));
+    button.addEventListener("mouseleave", () => updateHoverState(null));
+    button.addEventListener("click", () => selectCluster(button.dataset.clusterId));
+  });
+}
+
+function syncUrl() {
+  const url = new URL(window.location.href);
+
+  if (state.selectedClusterId) {
+    url.searchParams.set("community", state.selectedClusterId);
+  } else {
+    url.searchParams.delete("community");
+  }
+
+  if (state.query) {
+    url.searchParams.set("q", state.query);
+  } else {
+    url.searchParams.delete("q");
+  }
+
+  if (state.propertyFilter !== "all") {
+    url.searchParams.set("type", state.propertyFilter);
+  } else {
+    url.searchParams.delete("type");
+  }
+
+  window.history.replaceState({}, "", url);
+}
+
+function cancelCameraFlight() {
+  if (state.animationFrame) {
+    cancelAnimationFrame(state.animationFrame);
+    state.animationFrame = null;
+  }
+}
+
+function easeInOutCubic(progress) {
+  return progress < 0.5
+    ? 4 * progress * progress * progress
+    : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+}
+
+function animateCameraTo(targetPosition, targetFocus, duration = 2100) {
+  if (!hasWebgl) return;
+
+  cancelCameraFlight();
+  const startedAt = performance.now();
+  const startPosition = camera.position.clone();
+  const startTarget = controls.target.clone();
+
+  function step(now) {
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const eased = easeInOutCubic(progress);
+
+    camera.position.lerpVectors(startPosition, targetPosition, eased);
+    controls.target.lerpVectors(startTarget, targetFocus, eased);
+    controls.update();
+
+    if (progress < 1) {
+      state.animationFrame = requestAnimationFrame(step);
+    } else {
+      state.animationFrame = null;
+    }
+  }
+
+  state.animationFrame = requestAnimationFrame(step);
+}
+
+function getFocusCameraPosition(clusterPosition) {
+  const horizontalOffset = clusterPosition.x > 40 ? -105 : 105;
+  return clusterPosition.clone().add(new THREE.Vector3(horizontalOffset, 205, 205));
+}
+
+function updateSelectionRing(clusterId) {
+  if (!hasWebgl) return;
+
+  const cluster = state.clusters.find((entry) => entry.id === clusterId);
+  if (!cluster) {
+    selectedRing.visible = false;
+    return;
+  }
+
+  selectedRing.position.copy(getClusterPosition(cluster, 3));
+  selectedRing.visible = true;
+}
+
+function updateHoverState(clusterId) {
+  state.hoveredClusterId = clusterId;
+  const cluster = state.clusters.find((entry) => entry.id === clusterId);
+
+  if (!cluster) {
+    if (hoverRing) hoverRing.visible = false;
+    viewer.style.cursor = "grab";
+    return;
+  }
+
+  if (!hasWebgl) return;
+
+  hoverRing.position.copy(getClusterPosition(cluster, 3));
+  hoverRing.visible = true;
+  viewer.style.cursor = "pointer";
+}
+
+function selectCluster(clusterId) {
+  const cluster = state.clusters.find((entry) => entry.id === clusterId);
+  if (!cluster) return;
+
+  state.selectedClusterId = clusterId;
+  renderDetails(cluster);
+  renderCommunityList();
+  syncUrl();
+
+  if (hasWebgl) {
+    const position = getClusterPosition(cluster, 3);
+    updateSelectionRing(clusterId);
+    animateCameraTo(getFocusCameraPosition(position), position, 2200);
+  }
+}
+
+function clearSelection() {
+  state.selectedClusterId = null;
+  if (selectedRing) selectedRing.visible = false;
+  detailsCard.classList.remove("is-active");
+  renderCommunityList();
+  syncUrl();
+  resetView();
 }
 
 function resetView() {
-  state.scale = 1;
-  state.x = 0;
-  state.y = 0;
-  applyTransform();
+  if (!hasWebgl) return;
+  animateCameraTo(DEFAULT_VIEW.position, DEFAULT_VIEW.target, 1200);
 }
 
-function dragStart(clientX, clientY) {
-  state.isDragging = true;
-  state.dragMoved = false;
-  state.startX = clientX;
-  state.startY = clientY;
-  state.startOffsetX = state.x;
-  state.startOffsetY = state.y;
-  surface.classList.add("is-dragging");
+function onPointerMove(event) {
+  const rect = viewer.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster
+    .intersectObjects(interactiveMeshes, false)
+    .find((entry) => entry.object.userData.clusterId);
+
+  if (hit?.object.userData.clusterId !== state.hoveredClusterId) {
+    updateHoverState(hit?.object.userData.clusterId || null);
+  }
 }
 
-function dragMove(clientX, clientY) {
-  if (!state.isDragging) return;
+function onPointerClick(event) {
+  const rect = viewer.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
-  state.x = state.startOffsetX + (clientX - state.startX);
-  state.y = state.startOffsetY + (clientY - state.startY);
-  state.dragMoved =
-    Math.abs(clientX - state.startX) > 4 ||
-    Math.abs(clientY - state.startY) > 4;
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster
+    .intersectObjects(interactiveMeshes, false)
+    .find((entry) => entry.object.userData.clusterId);
 
-  applyTransform();
+  if (hit) {
+    selectCluster(hit.object.userData.clusterId);
+  }
 }
 
-function dragEnd() {
-  if (state.dragMoved) {
-    state.lastDragEndedAt = Date.now();
+function resizeRenderer() {
+  if (!hasWebgl) return;
+
+  const width = viewer.clientWidth;
+  const height = viewer.clientHeight;
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+  renderer.setSize(width, height, false);
+}
+
+function animate(now) {
+  if (!hasWebgl) return;
+
+  requestAnimationFrame(animate);
+  const pulse = 1 + Math.sin(now * 0.0028) * 0.06;
+
+  if (selectedRing.visible) {
+    selectedRing.scale.setScalar(pulse);
   }
 
-  state.isDragging = false;
-  surface.classList.remove("is-dragging");
+  markerById.forEach((marker) => {
+    marker.rotation.y = Math.sin(now * 0.00055 + marker.position.x) * 0.035;
+  });
+
+  controls.update();
+  renderer.render(scene, camera);
 }
 
-function pathFromPoints(points) {
-  if (!Array.isArray(points) || !points.length) return "";
-
-  const [firstPoint, ...remainingPoints] = points;
-  const lines = remainingPoints.map((point) => `L ${point.x} ${point.y}`).join(" ");
-
-  return `M ${firstPoint.x} ${firstPoint.y} ${lines} Z`;
-}
-
-function hexToRgba(hex, opacity) {
-  const normalized = hex.replace("#", "");
-  const red = parseInt(normalized.slice(0, 2), 16);
-  const green = parseInt(normalized.slice(2, 4), 16);
-  const blue = parseInt(normalized.slice(4, 6), 16);
-
-  return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
+async function loadJson(path) {
+  try {
+    const response = await fetch(path, { cache: "no-store" });
+    if (!response.ok) return [];
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
 }
 
 function normalizeClusters(clusters) {
   return clusters
     .map((cluster) => {
       const definition =
-        getClusterDefinitionById(cluster.id) ||
-        getClusterDefinitionByName(cluster.name);
+        clusterDefinitions.find((item) => item.id === cluster.id) ||
+        clusterDefinitions.find((item) => normalizeName(item.name) === normalizeName(cluster.name));
 
-      if (!definition) return null;
-
-      return {
-        id: definition.id,
-        name: definition.name,
-        color: definition.color,
-        points: Array.isArray(cluster.points)
-          ? cluster.points.filter(isValidPoint).map((point) => ({
-              x: Math.round(Number(point.x) * 100) / 100,
-              y: Math.round(Number(point.y) * 100) / 100,
-            }))
-          : [],
-      };
+      if (!definition || !Array.isArray(cluster.points) || cluster.points.length < 3) return null;
+      return { ...cluster, ...definition };
     })
-    .filter((cluster) => cluster && cluster.points.length >= 3);
+    .filter(Boolean)
+    .sort((a, b) => a.number - b.number);
 }
 
-async function loadClusters() {
-  try {
-    const response = await fetch("./data/clusters.json", { cache: "no-store" });
-    if (!response.ok) {
-      state.clusters = [];
-      return;
-    }
+function applyInitialView() {
+  const params = new URLSearchParams(window.location.search);
+  const query = params.get("q") || "";
+  const propertyFilter = params.get("type") || "all";
+  const clusterId = params.get("community");
 
-    const clusters = await response.json();
-    state.clusters = Array.isArray(clusters) ? normalizeClusters(clusters) : [];
-  } catch {
-    state.clusters = [];
-  }
-}
+  state.query = query;
+  communitySearch.value = query;
 
-async function loadUnits() {
-  try {
-    const response = await fetch("./data/units.json", { cache: "no-store" });
-    if (!response.ok) {
-      state.units = [];
-      return;
-    }
-
-    const units = await response.json();
-    state.units = Array.isArray(units) ? units.filter(hasValidUnitShape) : [];
-  } catch {
-    state.units = [];
-  }
-}
-
-async function loadClusterInventory() {
-  try {
-    const response = await fetch("./data/cluster-inventory.json", { cache: "no-store" });
-    if (!response.ok) {
-      state.clusterInventory = [];
-      return;
-    }
-
-    const inventory = await response.json();
-    state.clusterInventory = Array.isArray(inventory) ? inventory : [];
-  } catch {
-    state.clusterInventory = [];
-  }
-}
-
-function findClusterInventory(clusterName) {
-  return state.clusterInventory.find((item) => {
-    const name = item.cluster || item.name || item.clusterName;
-    return String(name).toLowerCase() === String(clusterName).toLowerCase();
-  });
-}
-
-function formatInventoryRows(inventory) {
-  if (!inventory) return "";
-
-  const ignoredKeys = new Set(["cluster", "name", "clusterName", "units"]);
-  const rows = [];
-
-  Object.entries(inventory).forEach(([key, value]) => {
-    if (ignoredKeys.has(key)) return;
-    if (Array.isArray(value)) {
-  rows.push(`
-    <div class="details-row">
-      <span class="details-label">${escapeHtml(formatLabel(key))}</span>
-      <span class="details-value">${escapeHtml(value.length)}</span>
-    </div>
-  `);
-  return;
-}
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      rows.push(`
-        <div class="details-row">
-          <span class="details-label">${escapeHtml(formatLabel(key))}</span>
-          <span class="details-value"></span>
-        </div>
-      `);
-
-      Object.entries(value).forEach(([subKey, subValue]) => {
-        rows.push(`
-          <div class="details-row">
-            <span class="details-label">- ${escapeHtml(formatLabel(subKey))}</span>
-            <span class="details-value">${escapeHtml(subValue)}</span>
-          </div>
-        `);
-      });
-
-      return;
-    }
-
-    rows.push(`
-      <div class="details-row">
-        <span class="details-label">${escapeHtml(formatLabel(key))}</span>
-        <span class="details-value">${escapeHtml(value)}</span>
-      </div>
-    `);
-  });
-
-  return rows.join("");
-}
-
-function formatLabel(key) {
-  return String(key)
-    .replace(/([A-Z])/g, " $1")
-    .replace(/[_-]/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
-    .trim();
-}
-
-function renderDetails(unit) {
-  if (!unit) {
-    detailsBody.innerHTML = '<p class="details-empty">No unit selected yet.</p>';
-    return;
-  }
-
-  detailsBody.innerHTML = `
-    <p class="details-kicker">${escapeHtml(unit.cluster)}</p>
-    <h3 class="details-title">${escapeHtml(unit.unitId)}</h3>
-    <div class="details-list">
-      <div class="details-row">
-        <span class="details-label">Status</span>
-        <span class="details-value">${escapeHtml(getStatusLabel(unit.status))}</span>
-      </div>
-      <div class="details-row">
-        <span class="details-label">Bedrooms</span>
-        <span class="details-value">${escapeHtml(unit.bedrooms || "-")}</span>
-      </div>
-      <div class="details-row">
-        <span class="details-label">Size</span>
-        <span class="details-value">${escapeHtml(unit.size || "-")}</span>
-      </div>
-      ${
-        unit.price
-          ? `<div class="details-row">
-              <span class="details-label">Price</span>
-              <span class="details-value">${escapeHtml(unit.price)}</span>
-            </div>`
-          : ""
-      }
-    </div>
-  `;
-}
-
-function renderClusterDetails(cluster) {
-  const inventory = findClusterInventory(cluster.name);
-  const mappedUnits = state.units.filter((unit) => unit.cluster === cluster.name);
-  const saleCount = mappedUnits.filter((unit) => unit.status === "sale").length;
-  const rentCount = mappedUnits.filter((unit) => unit.status === "rent").length;
-
-  if (inventory) {
-    detailsBody.innerHTML = `
-      <p class="details-kicker">Cluster Inventory</p>
-      <h3 class="details-title">${escapeHtml(cluster.name)}</h3>
-      <div class="details-list">
-        ${formatInventoryRows(inventory)}
-      </div>
-    `;
-    return;
-  }
-
-  detailsBody.innerHTML = `
-    <p class="details-kicker">Cluster</p>
-    <h3 class="details-title">${escapeHtml(cluster.name)}</h3>
-    <div class="details-list">
-      <div class="details-row">
-        <span class="details-label">Mapped Units</span>
-        <span class="details-value">${escapeHtml(mappedUnits.length)}</span>
-      </div>
-      <div class="details-row">
-        <span class="details-label">For Sale</span>
-        <span class="details-value">${escapeHtml(saleCount)}</span>
-      </div>
-      <div class="details-row">
-        <span class="details-label">For Rent</span>
-        <span class="details-value">${escapeHtml(rentCount)}</span>
-      </div>
-    </div>
-  `;
-}
-
-function showClusterTooltip(cluster, event) {
-  clusterTooltip.textContent = cluster.name;
-  clusterTooltip.setAttribute("aria-hidden", "false");
-  clusterTooltip.classList.add("is-visible");
-  moveClusterTooltip(event);
-}
-
-function moveClusterTooltip(event) {
-  const frameRect = frame.getBoundingClientRect();
-  const tooltipRect = clusterTooltip.getBoundingClientRect();
-
-  const left = Math.min(
-    frameRect.width - tooltipRect.width - 12,
-    Math.max(12, event.clientX - frameRect.left + 14)
-  );
-
-  const top = Math.min(
-    frameRect.height - tooltipRect.height - 12,
-    Math.max(12, event.clientY - frameRect.top + 14)
-  );
-
-  clusterTooltip.style.left = `${left}px`;
-  clusterTooltip.style.top = `${top}px`;
-}
-
-function hideClusterTooltip() {
-  clusterTooltip.classList.remove("is-visible");
-  clusterTooltip.setAttribute("aria-hidden", "true");
-}
-
-function handleClusterPointerMove(event) {
-  const clusterId = event.target.closest(".cluster-outline")?.dataset.clusterId;
-  const cluster = state.clusters.find((entry) => entry.id === clusterId);
-
-  if (!cluster) {
-    hideClusterTooltip();
-    return;
-  }
-
-  showClusterTooltip(cluster, event);
-}
-
-function renderClusterOutlines() {
-  clusterOutlineLayer.innerHTML = "";
-
-  state.clusters.forEach((cluster) => {
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    const isSelected = cluster.id === state.selectedClusterId;
-
-    path.setAttribute("class", `cluster-outline${isSelected ? " is-selected" : ""}`);
-    path.setAttribute("d", pathFromPoints(cluster.points));
-    path.setAttribute("tabindex", "0");
-    path.setAttribute("role", "button");
-    path.setAttribute("aria-label", cluster.name);
-    path.dataset.clusterId = cluster.id;
-    path.style.setProperty("--cluster-color", cluster.color);
-    path.style.setProperty("--cluster-fill", hexToRgba(cluster.color, 0.035));
-    path.style.setProperty("--cluster-fill-active", hexToRgba(cluster.color, 0.14));
-
-    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-    title.textContent = cluster.name;
-    path.appendChild(title);
-
-    path.addEventListener("mouseenter", (event) => showClusterTooltip(cluster, event));
-    path.addEventListener("mousemove", (event) => moveClusterTooltip(event));
-    path.addEventListener("pointermove", (event) => showClusterTooltip(cluster, event));
-    path.addEventListener("mouseleave", hideClusterTooltip);
-
-    path.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (Date.now() - state.lastDragEndedAt < 120) return;
-      selectCluster(cluster.id);
+  if (["all", "Townhouse", "Villa"].includes(propertyFilter)) {
+    state.propertyFilter = propertyFilter;
+    document.querySelectorAll(".filter-pill").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.propertyFilter === propertyFilter);
     });
+  }
 
-    path.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        selectCluster(cluster.id);
-      }
-    });
+  renderCommunityList();
 
-    clusterOutlineLayer.appendChild(path);
-  });
-}
-
-function renderUnits() {
-  unitLayer.innerHTML = "";
-
-  state.units.forEach((unit) => {
-    const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-
-    const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-    polygon.setAttribute("points", unit.points.map((point) => `${point.x},${point.y}`).join(" "));
-    polygon.setAttribute(
-      "class",
-      `unit-polygon status-${unit.status}${unit.id === state.selectedUnitId ? " is-selected" : ""}`
-    );
-    polygon.dataset.unitId = unit.id;
-
-    polygon.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (Date.now() - state.lastDragEndedAt < 120) return;
-      selectUnit(unit.id);
-    });
-
-    group.appendChild(polygon);
-
-    const centerX = unit.points.reduce((sum, point) => sum + point.x, 0) / unit.points.length;
-    const centerY = unit.points.reduce((sum, point) => sum + point.y, 0) / unit.points.length;
-
-    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    label.setAttribute("class", "unit-label");
-    label.setAttribute("x", centerX);
-    label.setAttribute("y", centerY);
-    label.textContent = unit.unitId;
-
-    group.appendChild(label);
-    unitLayer.appendChild(group);
-  });
-}
-
-function selectUnit(id) {
-  state.selectedUnitId = id;
-  state.selectedClusterId = null;
-
-  const unit = state.units.find((entry) => entry.id === id) || null;
-
-  renderDetails(unit);
-  renderClusterOutlines();
-  renderUnits();
-}
-
-function selectCluster(id) {
-  const cluster = state.clusters.find((entry) => entry.id === id);
-  if (!cluster) return;
-
-  state.selectedClusterId = id;
-  state.selectedUnitId = null;
-
-  renderClusterOutlines();
-  renderUnits();
-  renderClusterDetails(cluster);
-}
-
-frame.addEventListener(
-  "wheel",
-  (event) => {
-    event.preventDefault();
-    zoomBy(event.deltaY < 0 ? 1.12 : 0.9);
-  },
-  { passive: false }
-);
-
-frame.addEventListener("mousedown", (event) => {
-  dragStart(event.clientX, event.clientY);
-});
-
-window.addEventListener("mousemove", (event) => {
-  dragMove(event.clientX, event.clientY);
-});
-
-window.addEventListener("mouseup", dragEnd);
-window.addEventListener("mouseleave", dragEnd);
-
-frame.addEventListener(
-  "touchstart",
-  (event) => {
-    if (event.touches.length === 1) {
-      const touch = event.touches[0];
-      dragStart(touch.clientX, touch.clientY);
-    }
-  },
-  { passive: true }
-);
-
-frame.addEventListener(
-  "touchmove",
-  (event) => {
-    if (event.touches.length === 1 && state.isDragging) {
-      const touch = event.touches[0];
-      dragMove(touch.clientX, touch.clientY);
-    }
-  },
-  { passive: true }
-);
-
-frame.addEventListener("touchend", dragEnd);
-
-zoomInButton.addEventListener("click", () => zoomBy(1.18));
-zoomOutButton.addEventListener("click", () => zoomBy(0.84));
-resetButton.addEventListener("click", resetView);
-
-overlay.addEventListener("mousemove", handleClusterPointerMove);
-overlay.addEventListener("pointermove", handleClusterPointerMove);
-overlay.addEventListener("mouseleave", hideClusterTooltip);
-
-window.addEventListener("resize", applyTransform);
-
-if (masterPlan.complete) {
-  applyTransform();
-} else {
-  masterPlan.addEventListener("load", applyTransform);
+  if (clusterId) {
+    selectCluster(clusterId);
+  }
 }
 
 async function initialize() {
-  await loadClusters();
-  await loadUnits();
-  await loadClusterInventory();
+  const [clusters, inventory] = await Promise.all([
+    loadJson("./data/clusters.json"),
+    loadJson("./data/cluster-inventory.json"),
+  ]);
 
-  renderClusterOutlines();
-  renderUnits();
-  renderDetails(null);
-  applyTransform();
+  state.clusters = normalizeClusters(clusters);
+  state.inventory = inventory;
+
+  const totalResidences = inventory.reduce((sum, item) => sum + (Number(item.totalUnits) || 0), 0);
+  communityTotal.textContent = formatNumber(state.clusters.length);
+  residenceTotal.textContent = formatNumber(totalResidences);
+
+  createSceneCommunities();
+  applyInitialView();
+
+  if (hasWebgl) {
+    resizeRenderer();
+    animate(0);
+  }
 }
+
+hasWebgl = initializeScene();
+
+if (hasWebgl) {
+  controls.addEventListener("start", cancelCameraFlight);
+  viewer.addEventListener("pointermove", onPointerMove);
+  viewer.addEventListener("pointerleave", () => updateHoverState(null));
+  viewer.addEventListener("click", onPointerClick);
+}
+
+window.addEventListener("resize", resizeRenderer);
+zoomInButton.addEventListener("click", () => {
+  if (hasWebgl) controls.dollyIn(1.2);
+});
+zoomOutButton.addEventListener("click", () => {
+  if (hasWebgl) controls.dollyOut(1.2);
+});
+resetButton.addEventListener("click", resetView);
+detailsCloseButton.addEventListener("click", clearSelection);
+
+communitySearch.addEventListener("input", (event) => {
+  state.query = event.target.value;
+  renderCommunityList();
+  syncUrl();
+});
+
+document.querySelectorAll(".filter-pill").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".filter-pill").forEach((pill) => pill.classList.remove("is-active"));
+    button.classList.add("is-active");
+    state.propertyFilter = button.dataset.propertyFilter;
+    renderCommunityList();
+    syncUrl();
+  });
+});
 
 initialize();
