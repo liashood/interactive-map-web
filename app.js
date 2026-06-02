@@ -1,3 +1,5 @@
+import { getProductType } from "./src/product-mapper.js";
+
 const viewer = document.getElementById("viewer");
 const zoomInButton = document.getElementById("zoom-in");
 const zoomOutButton = document.getElementById("zoom-out");
@@ -10,6 +12,7 @@ const communityCount = document.getElementById("community-count");
 const communityTotal = document.getElementById("community-total");
 const residenceTotal = document.getElementById("residence-total");
 const communitySearch = document.getElementById("community-search");
+const searchSuggestions = document.getElementById("search-suggestions");
 
 const TEXTURE = {
   width: 1448,
@@ -192,7 +195,7 @@ function initializeScene() {
     slab.receiveShadow = true;
     scene.add(slab);
 
-    const mapTexture = new THREE.TextureLoader().load("./assets/damac-lagoons-masterplan.png");
+    const mapTexture = new THREE.TextureLoader().load("./assets/images/damac-lagoons-masterplan.png");
     mapTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
     mapTexture.encoding = THREE.sRGBEncoding;
     mapTexture.offset.set(
@@ -446,10 +449,22 @@ function renderDetails(cluster) {
   }
 
   const inventory = findClusterInventory(cluster.name);
-  const categoryEntries = Object.entries(inventory?.categories || {});
+  const categoryTotals = {};
+
+  Object.entries(inventory?.typeBreakdown || {}).forEach(([type, count]) => {
+    const productType = getProductType(type);
+    categoryTotals[productType] = (categoryTotals[productType] || 0) + Number(count || 0);
+  });
+
+  const categoryEntries = Object.entries(categoryTotals).sort(([, countA], [, countB]) => countB - countA);
+
   const styleEntries = Object.entries(inventory?.typeBreakdown || {})
-    .sort(([, countA], [, countB]) => countB - countA)
-    .slice(0, 3);
+  .filter(([type]) => {
+    if (!state.query.trim()) return true;
+    return matchesSearchValue(type, state.query);
+  })
+  .sort(([, countA], [, countB]) => countB - countA);
+
   const listRows = [
     ...categoryEntries.map(([label, value]) => [label, `${formatNumber(value)} residences`]),
     ...styleEntries.map(([label, value]) => [label, formatNumber(value)]),
@@ -466,8 +481,8 @@ function renderDetails(cluster) {
         <span>Residences</span>
       </div>
       <div class="highlight-cell">
-        <strong>${escapeHtml(getCategoryCount(inventory))}</strong>
-        <span>Home types</span>
+        <strong>${escapeHtml(Object.keys(inventory?.typeBreakdown || {}).length)}</strong>
+<span>Home types</span>
       </div>
       <div class="highlight-cell">
         <strong>${escapeHtml(getBedroomLabel(inventory))}</strong>
@@ -477,7 +492,7 @@ function renderDetails(cluster) {
 
     <div class="details-list">
       ${listRows
-        .slice(0, 5)
+        .slice(0, 20)
         .map(
           ([label, value]) => `
             <div class="details-row">
@@ -498,18 +513,136 @@ function renderDetails(cluster) {
   detailsCard.classList.add("is-active");
 }
 
+function normalizeSearchToken(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function getSearchTokens(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .map(normalizeSearchToken);
+}
+
+function matchesSearchValue(value, rawQuery) {
+  const queryTokens = getSearchTokens(rawQuery);
+  const valueTokens = getSearchTokens(value);
+
+  if (!queryTokens.length) return true;
+  if (!valueTokens.length) return false;
+
+  let searchFromIndex = 0;
+
+  return queryTokens.every((queryToken) => {
+    const matchedIndex = valueTokens.findIndex((valueToken, index) => {
+      return index >= searchFromIndex && valueToken.startsWith(queryToken);
+    });
+
+    if (matchedIndex === -1) return false;
+
+    searchFromIndex = matchedIndex + 1;
+    return true;
+  });
+}
+
 function getFilteredClusters() {
-  const query = normalizeName(state.query);
+  const rawQuery = state.query.trim();
 
   return state.clusters.filter((cluster) => {
     const inventory = findClusterInventory(cluster.name);
+
+    const typeCodes = Object.keys(inventory?.typeBreakdown || {});
+    const productCategories = typeCodes.map((type) => getProductType(type));
+    const bedrooms = Object.keys(inventory?.bedrooms || {}).map((bedroom) => `${bedroom} BR`);
+
     const hasPropertyType =
       state.propertyFilter === "all" ||
-      Object.prototype.hasOwnProperty.call(inventory?.categories || {}, state.propertyFilter);
-    const matchesQuery = !query || normalizeName(cluster.name).includes(query);
+      productCategories.includes(state.propertyFilter);
 
-    return hasPropertyType && matchesQuery;
+    if (!rawQuery) return hasPropertyType;
+
+    const matchesClusterName = matchesSearchValue(cluster.name, rawQuery);
+
+    const matchesTypeCode = typeCodes.some((type) =>
+      matchesSearchValue(type, rawQuery)
+    );
+
+    const matchesProductCategory = productCategories.some((category) =>
+      matchesSearchValue(category, rawQuery)
+    );
+
+    const matchesBedroom = bedrooms.some((bedroom) =>
+      matchesSearchValue(bedroom, rawQuery)
+    );
+
+    return (
+      hasPropertyType &&
+      (matchesClusterName || matchesTypeCode || matchesProductCategory || matchesBedroom)
+    );
   });
+}
+
+function getSearchSuggestions() {
+  const query = state.query.trim();
+
+  if (!query) return [];
+
+  const suggestions = [];
+
+  state.clusters.forEach((cluster) => {
+    if (matchesSearchValue(cluster.name, query)) {
+      suggestions.push({
+        label: cluster.name,
+        meta: "Community",
+        value: cluster.name,
+      });
+    }
+
+    const inventory = findClusterInventory(cluster.name);
+
+    Object.keys(inventory?.typeBreakdown || {}).forEach((type) => {
+      if (matchesSearchValue(type, query)) {
+        suggestions.push({
+          label: type,
+          meta: cluster.name,
+          value: type,
+        });
+      }
+    });
+  });
+
+  const uniqueSuggestions = Array.from(
+    new Map(suggestions.map((item) => [`${item.label}-${item.meta}`, item])).values()
+  );
+
+  return uniqueSuggestions.slice(0, 8);
+}
+
+function renderSearchSuggestions() {
+  const suggestions = getSearchSuggestions();
+
+  if (!suggestions.length) {
+    searchSuggestions.innerHTML = "";
+    searchSuggestions.setAttribute("aria-hidden", "true");
+    return;
+  }
+
+  searchSuggestions.innerHTML = suggestions
+    .map(
+      (item) => `
+        <button class="search-suggestion" type="button" data-search-value="${escapeHtml(item.value)}" data-cluster-name="${escapeHtml(item.meta)}">
+          <span>${escapeHtml(item.label)}</span>
+          <small>${escapeHtml(item.meta)}</small>
+        </button>
+      `
+    )
+    .join("");
+
+  searchSuggestions.setAttribute("aria-hidden", "false");
 }
 
 function renderCommunityList() {
@@ -667,6 +800,16 @@ function selectCluster(clusterId) {
     updateSelectionRing(clusterId);
     animateCameraTo(getFocusCameraPosition(position), position, 2200);
   }
+}
+
+function selectClusterByName(clusterName) {
+  const cluster = state.clusters.find(
+    (entry) => normalizeName(entry.name) === normalizeName(clusterName)
+  );
+
+  if (!cluster) return;
+
+  selectCluster(cluster.id);
 }
 
 function clearSelection() {
@@ -833,7 +976,28 @@ detailsCloseButton.addEventListener("click", clearSelection);
 communitySearch.addEventListener("input", (event) => {
   state.query = event.target.value;
   renderCommunityList();
+  renderSearchSuggestions();
   syncUrl();
+});
+
+searchSuggestions.addEventListener("click", (event) => {
+  const button = event.target.closest(".search-suggestion");
+
+  if (!button) return;
+
+  state.query = button.dataset.searchValue;
+  communitySearch.value = state.query;
+
+  renderCommunityList();
+  renderSearchSuggestions();
+
+  const clusterName = button.dataset.clusterName;
+
+  if (clusterName) {
+    selectClusterByName(clusterName);
+  } else {
+    syncUrl();
+  }
 });
 
 document.querySelectorAll(".filter-pill").forEach((button) => {

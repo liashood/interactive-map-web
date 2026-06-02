@@ -18,18 +18,22 @@
         <span class="brand-name">Lagoons</span>
       </a>
 
-      <label class="global-search">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="m20 20-4.2-4.2m1.2-5.3a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z"></path>
-        </svg>
-        <span class="sr-only">Search communities</span>
-        <input
-          id="community-search"
-          type="search"
-          placeholder="Where would you like to explore?"
-          autocomplete="off"
-        >
-      </label>
+      <div class="global-search-wrap">
+  <label class="global-search">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m20 20-4.2-4.2m1.2-5.3a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z"></path>
+    </svg>
+    <span class="sr-only">Search communities</span>
+    <input
+      id="community-search"
+      type="search"
+      placeholder="Where would you like to explore?"
+      autocomplete="off"
+    >
+  </label>
+
+  <div class="search-suggestions" id="search-suggestions" aria-hidden="true"></div>
+</div>
 
       <div class="topbar-stats" aria-label="Masterplan summary">
         <span><strong id="community-total">11</strong> communities</span>
@@ -116,6 +120,6 @@
 
   <script src="./assets/vendor/three.min.js"></script>
   <script src="./assets/vendor/OrbitControls.js"></script>
-  <script src="./app.js"></script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>
