@@ -1,0 +1,1 @@
+window.DAMAC_RENT_AVAILABILITY = [];

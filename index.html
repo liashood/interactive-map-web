@@ -82,6 +82,25 @@
           </div>
         </div>
 
+        <div class="filter-block">
+  <div class="section-heading">
+    <h2>Availability</h2>
+    <span>Filter</span>
+  </div>
+
+  <div class="filter-pills" role="group" aria-label="Filter communities by availability">
+    <button class="filter-pill is-active" type="button" data-availability-filter="all">
+      All
+    </button>
+    <button class="filter-pill" type="button" data-availability-filter="sale">
+      For Sale
+    </button>
+    <button class="filter-pill" type="button" data-availability-filter="rent">
+      For Rent
+    </button>
+  </div>
+       </div>
+
         <div class="communities-block">
           <div class="section-heading">
             <h2>Communities</h2>
@@ -120,6 +139,9 @@
 
   <script src="./assets/vendor/three.min.js"></script>
   <script src="./assets/vendor/OrbitControls.js"></script>
+  <script src="./data/sale-availability.js"></script>
+  <script src="./data/rent-availability.js"></script>
+  <script src="./data/units.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>

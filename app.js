@@ -59,6 +59,7 @@ const state = {
   hoveredClusterId: null,
   query: "",
   propertyFilter: "all",
+  availabilityFilter: "all",
   animationFrame: null,
 };
 
@@ -429,8 +430,44 @@ function findClusterInventory(clusterName) {
   return findInventoryItem(state.inventory, clusterName);
 }
 
+function getClusterAvailability(clusterName) {
+  if (!window.DAMAC_UNITS) {
+    return { sale: [], rent: [] };
+  }
 
+  return window.DAMAC_UNITS.getAvailabilityByCluster(clusterName);
+}
 
+function getAvailabilityLabel(availability) {
+  const saleCount = availability?.sale?.length || 0;
+  const rentCount = availability?.rent?.length || 0;
+
+  if (saleCount && rentCount) return `${saleCount} sale / ${rentCount} rent`;
+  if (saleCount) return `${saleCount} for sale`;
+  if (rentCount) return `${rentCount} for rent`;
+
+  return "No live listings";
+}
+
+function getCommunityDisplayTotal(inventory, availability) {
+  const saleCount = availability?.sale?.length || 0;
+  const rentCount = availability?.rent?.length || 0;
+
+  if (state.availabilityFilter === "sale") return saleCount;
+  if (state.availabilityFilter === "rent") return rentCount;
+
+  return Number(inventory?.totalUnits) || 0;
+}
+
+function matchesAvailabilityFilter(availability) {
+  const saleCount = availability?.sale?.length || 0;
+  const rentCount = availability?.rent?.length || 0;
+
+  if (state.availabilityFilter === "sale") return saleCount > 0;
+  if (state.availabilityFilter === "rent") return rentCount > 0;
+
+  return true;
+}
 
 function renderDetails(cluster) {
   if (!cluster) {
@@ -439,13 +476,15 @@ function renderDetails(cluster) {
   }
 
   const inventory = findClusterInventory(cluster.name);
+  const availability = getClusterAvailability(cluster.name);
 
   detailsBody.innerHTML = renderDetailsContent({
-    cluster,
-    inventory,
-    query: state.query,
-    formatNumber,
-  });
+  cluster,
+  inventory,
+  availability,
+  query: state.query,
+  formatNumber,
+});
 
   document.getElementById("details-reset-view").addEventListener("click", resetView);
   detailsCard.classList.add("is-active");
@@ -493,7 +532,9 @@ function renderSearchSuggestions() {
 }
 
 function renderCommunityList() {
-  const clusters = getFilteredClusters();
+  const clusters = getFilteredClusters().filter((cluster) => {
+  return matchesAvailabilityFilter(getClusterAvailability(cluster.name));
+});
   communityCount.textContent = `${clusters.length} ${clusters.length === 1 ? "place" : "places"}`;
 
   if (!clusters.length) {
@@ -508,6 +549,8 @@ function renderCommunityList() {
   communityList.innerHTML = clusters
     .map((cluster) => {
       const inventory = findClusterInventory(cluster.name);
+      const availability = getClusterAvailability(cluster.name);
+      const availabilityLabel = getAvailabilityLabel(availability);
       const isSelected = cluster.id === state.selectedClusterId;
 
       return `
@@ -520,9 +563,9 @@ function renderCommunityList() {
           <span class="community-item-number">${escapeHtml(cluster.number)}</span>
           <span class="community-item-copy">
             <strong>${escapeHtml(cluster.name)}</strong>
-            <span>${escapeHtml(getPrimaryCategory(inventory))} &middot; ${escapeHtml(getBedroomLabel(inventory))}</span>
+            <span>${escapeHtml(getPrimaryCategory(inventory))} &middot; ${escapeHtml(getBedroomLabel(inventory))} &middot; ${escapeHtml(availabilityLabel)}</span>
           </span>
-          <span class="community-item-total">${escapeHtml(formatNumber(inventory?.totalUnits))}</span>
+          <span class="community-item-total">${escapeHtml(formatNumber(getCommunityDisplayTotal(inventory, availability)))}</span>
         </button>
       `;
     })
@@ -537,6 +580,12 @@ function renderCommunityList() {
 
 function syncUrl() {
   const url = new URL(window.location.href);
+
+  if (state.availabilityFilter !== "all") {
+  url.searchParams.set("availability", state.availabilityFilter);
+} else {
+  url.searchParams.delete("availability");
+}
 
   if (state.selectedClusterId) {
     url.searchParams.set("community", state.selectedClusterId);
@@ -760,14 +809,25 @@ function applyInitialView() {
   const params = new URLSearchParams(window.location.search);
   const query = params.get("q") || "";
   const propertyFilter = params.get("type") || "all";
+  const availabilityFilter = params.get("availability") || "all";
   const clusterId = params.get("community");
 
   state.query = query;
   communitySearch.value = query;
 
+  if (["all", "sale", "rent"].includes(availabilityFilter)) {
+    state.availabilityFilter = availabilityFilter;
+    document.querySelectorAll("[data-availability-filter]").forEach((button) => {
+      button.classList.toggle(
+        "is-active",
+        button.dataset.availabilityFilter === availabilityFilter
+      );
+    });
+  }
+
   if (["all", "Townhouse", "Villa"].includes(propertyFilter)) {
     state.propertyFilter = propertyFilter;
-    document.querySelectorAll(".filter-pill").forEach((button) => {
+    document.querySelectorAll("[data-property-filter]").forEach((button) => {
       button.classList.toggle("is-active", button.dataset.propertyFilter === propertyFilter);
     });
   }
@@ -847,11 +907,29 @@ searchSuggestions.addEventListener("click", (event) => {
   }
 });
 
-document.querySelectorAll(".filter-pill").forEach((button) => {
+document.querySelectorAll("[data-property-filter]").forEach((button) => {
   button.addEventListener("click", () => {
-    document.querySelectorAll(".filter-pill").forEach((pill) => pill.classList.remove("is-active"));
+    document.querySelectorAll("[data-property-filter]").forEach((pill) => {
+      pill.classList.remove("is-active");
+    });
+
     button.classList.add("is-active");
     state.propertyFilter = button.dataset.propertyFilter;
+
+    renderCommunityList();
+    syncUrl();
+  });
+});
+
+document.querySelectorAll("[data-availability-filter]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll("[data-availability-filter]").forEach((pill) => {
+      pill.classList.remove("is-active");
+    });
+
+    button.classList.add("is-active");
+    state.availabilityFilter = button.dataset.availabilityFilter;
+
     renderCommunityList();
     syncUrl();
   });
