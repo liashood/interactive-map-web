@@ -14,7 +14,7 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => replacements[character]);
 }
 
-export function renderDetailsContent({ cluster, inventory, query, formatNumber }) {
+export function renderDetailsContent({ cluster, inventory, availability, query, formatNumber }) {
   const categoryTotals = {};
 
   Object.entries(inventory?.typeBreakdown || {}).forEach(([type, count]) => {
@@ -31,10 +31,25 @@ export function renderDetailsContent({ cluster, inventory, query, formatNumber }
     })
     .sort(([, countA], [, countB]) => countB - countA);
 
+    const saleUnits = availability?.sale || [];
+const rentUnits = availability?.rent || [];
+const salePrices = saleUnits
+  .map((unit) => Number(unit.lowestSalesListingPrice))
+  .filter((price) => Number.isFinite(price) && price > 0);
+
+const lowestSalePrice = salePrices.length ? Math.min(...salePrices) : null;
+
+const availabilityRows = [
+  saleUnits.length ? ["Available for sale", `${formatNumber(saleUnits.length)} units`] : null,
+  lowestSalePrice ? ["Lowest sale listing", `AED ${formatNumber(lowestSalePrice)}`] : null,
+  rentUnits.length ? ["Available for rent", `${formatNumber(rentUnits.length)} units`] : null,
+].filter(Boolean);
+
   const listRows = [
-    ...categoryEntries.map(([label, value]) => [label, `${formatNumber(value)} residences`]),
-    ...styleEntries.map(([label, value]) => [label, formatNumber(value)]),
-  ];
+  ...availabilityRows,
+  ...categoryEntries.map(([label, value]) => [label, `${formatNumber(value)} residences`]),
+  ...styleEntries.map(([label, value]) => [label, formatNumber(value)]),
+];
 
   return `
     <p class="details-kicker">Community ${escapeHtml(cluster.number)}</p>
