@@ -206,7 +206,7 @@ button {
   inset: 0;
   background:
     linear-gradient(rgba(228, 239, 231, 0.46), rgba(243, 239, 226, 0.46)),
-    url("./assets/damac-lagoons-masterplan.png") center / min(78vw, 1180px) auto no-repeat;
+    url("./assets/images/damac-lagoons-masterplan.png") center / min(78vw, 1180px) auto no-repeat;
   cursor: grab;
 }
 
