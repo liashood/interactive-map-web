@@ -1,4 +1,16 @@
-import { getProductType } from "./src/product-mapper.js";
+import {
+  findClusterInventory as findInventoryItem,
+  getBedroomLabel,
+  getPrimaryCategory,
+  getTotalResidences,
+} from "./src/inventory-service.js";
+
+import {
+  getFilteredClusters as filterClusters,
+  getSearchSuggestions as buildSearchSuggestions,
+} from "./src/search-service.js";
+
+import { renderDetailsContent } from "./src/details-view.js";
 
 const viewer = document.getElementById("viewer");
 const zoomInButton = document.getElementById("zoom-in");
@@ -414,33 +426,11 @@ function createSceneCommunities() {
 }
 
 function findClusterInventory(clusterName) {
-  const normalizedName = normalizeName(clusterName);
-  return state.inventory.find((item) => {
-    const name = item.cluster || item.name || item.clusterName;
-    return normalizeName(name) === normalizedName;
-  });
+  return findInventoryItem(state.inventory, clusterName);
 }
 
-function getPrimaryCategory(inventory) {
-  if (!inventory?.categories) return "Community";
 
-  return Object.entries(inventory.categories)
-    .sort(([, countA], [, countB]) => countB - countA)[0]?.[0] || "Community";
-}
 
-function getCategoryCount(inventory) {
-  return Object.keys(inventory?.categories || {}).length;
-}
-
-function getBedroomLabel(inventory) {
-  const counts = Object.keys(inventory?.bedrooms || {})
-    .map((label) => Number.parseInt(label, 10))
-    .filter(Number.isFinite);
-
-  if (!counts.length) return "Mixed";
-  if (counts.length === 1) return `${counts[0]} BR`;
-  return `${Math.min(...counts)}-${Math.max(...counts)} BR`;
-}
 
 function renderDetails(cluster) {
   if (!cluster) {
@@ -449,177 +439,34 @@ function renderDetails(cluster) {
   }
 
   const inventory = findClusterInventory(cluster.name);
-  const categoryTotals = {};
 
-  Object.entries(inventory?.typeBreakdown || {}).forEach(([type, count]) => {
-    const productType = getProductType(type);
-    categoryTotals[productType] = (categoryTotals[productType] || 0) + Number(count || 0);
+  detailsBody.innerHTML = renderDetailsContent({
+    cluster,
+    inventory,
+    query: state.query,
+    formatNumber,
   });
-
-  const categoryEntries = Object.entries(categoryTotals).sort(([, countA], [, countB]) => countB - countA);
-
-  const styleEntries = Object.entries(inventory?.typeBreakdown || {})
-  .filter(([type]) => {
-    if (!state.query.trim()) return true;
-    return matchesSearchValue(type, state.query);
-  })
-  .sort(([, countA], [, countB]) => countB - countA);
-
-  const listRows = [
-    ...categoryEntries.map(([label, value]) => [label, `${formatNumber(value)} residences`]),
-    ...styleEntries.map(([label, value]) => [label, formatNumber(value)]),
-  ];
-
-  detailsBody.innerHTML = `
-    <p class="details-kicker">Community ${escapeHtml(cluster.number)}</p>
-    <h2 class="details-title">${escapeHtml(cluster.name)}</h2>
-    <p class="details-description">${escapeHtml(cluster.description)}</p>
-
-    <div class="details-highlight">
-      <div class="highlight-cell">
-        <strong>${escapeHtml(formatNumber(inventory?.totalUnits))}</strong>
-        <span>Residences</span>
-      </div>
-      <div class="highlight-cell">
-        <strong>${escapeHtml(Object.keys(inventory?.typeBreakdown || {}).length)}</strong>
-<span>Home types</span>
-      </div>
-      <div class="highlight-cell">
-        <strong>${escapeHtml(getBedroomLabel(inventory))}</strong>
-        <span>Bedroom mix</span>
-      </div>
-    </div>
-
-    <div class="details-list">
-      ${listRows
-        .slice(0, 20)
-        .map(
-          ([label, value]) => `
-            <div class="details-row">
-              <span class="details-label">${escapeHtml(label)}</span>
-              <span class="details-value">${escapeHtml(value)}</span>
-            </div>
-          `
-        )
-        .join("")}
-    </div>
-
-    <button class="details-action" id="details-reset-view" type="button">
-      Return to full masterplan
-    </button>
-  `;
 
   document.getElementById("details-reset-view").addEventListener("click", resetView);
   detailsCard.classList.add("is-active");
 }
 
-function normalizeSearchToken(value) {
-  return String(value ?? "")
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/[^a-z0-9]/g, "");
-}
-
-function getSearchTokens(value) {
-  return String(value ?? "")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean)
-    .map(normalizeSearchToken);
-}
-
-function matchesSearchValue(value, rawQuery) {
-  const queryTokens = getSearchTokens(rawQuery);
-  const valueTokens = getSearchTokens(value);
-
-  if (!queryTokens.length) return true;
-  if (!valueTokens.length) return false;
-
-  let searchFromIndex = 0;
-
-  return queryTokens.every((queryToken) => {
-    const matchedIndex = valueTokens.findIndex((valueToken, index) => {
-      return index >= searchFromIndex && valueToken.startsWith(queryToken);
-    });
-
-    if (matchedIndex === -1) return false;
-
-    searchFromIndex = matchedIndex + 1;
-    return true;
-  });
-}
 
 function getFilteredClusters() {
-  const rawQuery = state.query.trim();
-
-  return state.clusters.filter((cluster) => {
-    const inventory = findClusterInventory(cluster.name);
-
-    const typeCodes = Object.keys(inventory?.typeBreakdown || {});
-    const productCategories = typeCodes.map((type) => getProductType(type));
-    const bedrooms = Object.keys(inventory?.bedrooms || {}).map((bedroom) => `${bedroom} BR`);
-
-    const hasPropertyType =
-      state.propertyFilter === "all" ||
-      productCategories.includes(state.propertyFilter);
-
-    if (!rawQuery) return hasPropertyType;
-
-    const matchesClusterName = matchesSearchValue(cluster.name, rawQuery);
-
-    const matchesTypeCode = typeCodes.some((type) =>
-      matchesSearchValue(type, rawQuery)
-    );
-
-    const matchesProductCategory = productCategories.some((category) =>
-      matchesSearchValue(category, rawQuery)
-    );
-
-    const matchesBedroom = bedrooms.some((bedroom) =>
-      matchesSearchValue(bedroom, rawQuery)
-    );
-
-    return (
-      hasPropertyType &&
-      (matchesClusterName || matchesTypeCode || matchesProductCategory || matchesBedroom)
-    );
+  return filterClusters({
+    clusters: state.clusters,
+    inventoryItems: state.inventory,
+    query: state.query,
+    propertyFilter: state.propertyFilter,
   });
 }
 
 function getSearchSuggestions() {
-  const query = state.query.trim();
-
-  if (!query) return [];
-
-  const suggestions = [];
-
-  state.clusters.forEach((cluster) => {
-    if (matchesSearchValue(cluster.name, query)) {
-      suggestions.push({
-        label: cluster.name,
-        meta: "Community",
-        value: cluster.name,
-      });
-    }
-
-    const inventory = findClusterInventory(cluster.name);
-
-    Object.keys(inventory?.typeBreakdown || {}).forEach((type) => {
-      if (matchesSearchValue(type, query)) {
-        suggestions.push({
-          label: type,
-          meta: cluster.name,
-          value: type,
-        });
-      }
-    });
+  return buildSearchSuggestions({
+    clusters: state.clusters,
+    inventoryItems: state.inventory,
+    query: state.query,
   });
-
-  const uniqueSuggestions = Array.from(
-    new Map(suggestions.map((item) => [`${item.label}-${item.meta}`, item])).values()
-  );
-
-  return uniqueSuggestions.slice(0, 8);
 }
 
 function renderSearchSuggestions() {
@@ -941,7 +788,7 @@ async function initialize() {
   state.clusters = normalizeClusters(clusters);
   state.inventory = inventory;
 
-  const totalResidences = inventory.reduce((sum, item) => sum + (Number(item.totalUnits) || 0), 0);
+  const totalResidences = getTotalResidences(inventory);
   communityTotal.textContent = formatNumber(state.clusters.length);
   residenceTotal.textContent = formatNumber(totalResidences);
 
