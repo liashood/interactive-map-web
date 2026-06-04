@@ -65,41 +65,56 @@
         </div>
 
         <div class="filter-block">
-          <div class="section-heading">
-            <h2>Property type</h2>
-            <span>Filter</span>
-          </div>
-          <div class="filter-pills" role="group" aria-label="Filter communities by property type">
-            <button class="filter-pill is-active" type="button" data-property-filter="all">
-              All
-            </button>
-            <button class="filter-pill" type="button" data-property-filter="Townhouse">
-              Townhouses
-            </button>
-            <button class="filter-pill" type="button" data-property-filter="Villa">
-              Villas
-            </button>
-          </div>
-        </div>
-
-        <div class="filter-block">
   <div class="section-heading">
-    <h2>Availability</h2>
+    <h2>Sale status</h2>
     <span>Filter</span>
   </div>
 
-  <div class="filter-pills" role="group" aria-label="Filter communities by availability">
-    <button class="filter-pill is-active" type="button" data-availability-filter="all">
+  <div class="filter-pills" role="group" aria-label="Filter communities by sale status">
+    <button class="filter-pill is-active" type="button" data-sale-filter="all">
       All
     </button>
-    <button class="filter-pill" type="button" data-availability-filter="sale">
-      For Sale
-    </button>
-    <button class="filter-pill" type="button" data-availability-filter="rent">
-      For Rent
+    <button class="filter-pill" type="button" data-sale-filter="available">
+      Available
     </button>
   </div>
-       </div>
+</div>
+
+<div class="filter-block">
+  <div class="section-heading">
+    <h2>Bedrooms</h2>
+    <span>Sale units</span>
+  </div>
+
+  <div
+    class="filter-pills"
+    id="bedroom-filter-pills"
+    role="group"
+    aria-label="Filter sale units by bedroom count"
+  >
+    <button class="filter-pill is-active" type="button" data-bedroom-filter="all">
+      All
+    </button>
+  </div>
+</div>
+
+<div class="filter-block">
+  <div class="section-heading">
+    <h2>Product code</h2>
+    <span>Sale units</span>
+  </div>
+
+  <div
+    class="filter-pills"
+    id="product-code-filter-pills"
+    role="group"
+    aria-label="Filter sale units by product code"
+  >
+    <button class="filter-pill is-active" type="button" data-product-code-filter="all">
+      All
+    </button>
+  </div>
+</div>
 
         <div class="communities-block">
           <div class="section-heading">

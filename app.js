@@ -11,6 +11,13 @@ import {
 } from "./src/search-service.js";
 
 import { renderDetailsContent } from "./src/details-view.js";
+import { renderSaleUnitsContent } from "./src/sale-units-view.js";
+
+import {
+  getAvailableFilterOptions,
+  hasActiveUnitFilters,
+  filterUnits,
+} from "./src/unit-filter-service.js";
 
 const viewer = document.getElementById("viewer");
 const zoomInButton = document.getElementById("zoom-in");
@@ -25,6 +32,8 @@ const communityTotal = document.getElementById("community-total");
 const residenceTotal = document.getElementById("residence-total");
 const communitySearch = document.getElementById("community-search");
 const searchSuggestions = document.getElementById("search-suggestions");
+const bedroomFilterPills = document.getElementById("bedroom-filter-pills");
+const productCodeFilterPills = document.getElementById("product-code-filter-pills");
 
 const TEXTURE = {
   width: 1448,
@@ -59,7 +68,9 @@ const state = {
   hoveredClusterId: null,
   query: "",
   propertyFilter: "all",
-  availabilityFilter: "all",
+  saleFilter: "all",
+  bedroomFilter: "all",
+  productCodeFilter: "all",
   animationFrame: null,
 };
 
@@ -435,7 +446,12 @@ function getClusterAvailability(clusterName) {
     return { sale: [], rent: [] };
   }
 
-  return window.DAMAC_UNITS.getAvailabilityByCluster(clusterName);
+  const availability = window.DAMAC_UNITS.getAvailabilityByCluster(clusterName);
+
+  return {
+    ...availability,
+    sale: filterUnits(availability.sale, getUnitFilters()),
+  };
 }
 
 function getAvailabilityLabel(availability) {
@@ -451,20 +467,16 @@ function getAvailabilityLabel(availability) {
 
 function getCommunityDisplayTotal(inventory, availability) {
   const saleCount = availability?.sale?.length || 0;
-  const rentCount = availability?.rent?.length || 0;
 
-  if (state.availabilityFilter === "sale") return saleCount;
-  if (state.availabilityFilter === "rent") return rentCount;
+  if (hasActiveUnitFilters(getUnitFilters())) return saleCount;
 
   return Number(inventory?.totalUnits) || 0;
 }
 
 function matchesAvailabilityFilter(availability) {
   const saleCount = availability?.sale?.length || 0;
-  const rentCount = availability?.rent?.length || 0;
 
-  if (state.availabilityFilter === "sale") return saleCount > 0;
-  if (state.availabilityFilter === "rent") return rentCount > 0;
+  if (hasActiveUnitFilters(getUnitFilters())) return saleCount > 0;
 
   return true;
 }
@@ -479,14 +491,29 @@ function renderDetails(cluster) {
   const availability = getClusterAvailability(cluster.name);
 
   detailsBody.innerHTML = renderDetailsContent({
-  cluster,
-  inventory,
-  availability,
-  query: state.query,
-  formatNumber,
-});
+    cluster,
+    inventory,
+    availability,
+    query: state.query,
+    formatNumber,
+  });
 
   document.getElementById("details-reset-view").addEventListener("click", resetView);
+  detailsCard.classList.add("is-active");
+}
+
+function renderSaleUnitList(cluster) {
+  if (!cluster) return;
+
+  const availability = getClusterAvailability(cluster.name);
+
+  detailsBody.innerHTML = renderSaleUnitsContent({
+    cluster,
+    saleUnits: availability.sale,
+    formatNumber,
+  });
+
+  document.getElementById("details-reset-view")?.addEventListener("click", resetView);
   detailsCard.classList.add("is-active");
 }
 
@@ -498,6 +525,61 @@ function getFilteredClusters() {
     query: state.query,
     propertyFilter: state.propertyFilter,
   });
+}
+
+function getUnitFilters() {
+  return {
+    availableForSaleOnly: state.saleFilter === "available",
+    bedroomFilter: state.bedroomFilter,
+    productCodeFilter: state.productCodeFilter,
+  };
+}
+
+function getSaleFilterOptions() {
+  const saleUnits = window.DAMAC_UNITS?.sale || [];
+  return getAvailableFilterOptions(saleUnits);
+}
+
+function renderGeneratedFilterPills(container, options, datasetName, activeValue, labelFormatter) {
+  if (!container) return;
+
+  const allButton = `
+    <button class="filter-pill${activeValue === "all" ? " is-active" : ""}" type="button" data-${datasetName}="all">
+      All
+    </button>
+  `;
+
+  const optionButtons = options
+    .map((option) => {
+      return `
+        <button class="filter-pill${String(option) === String(activeValue) ? " is-active" : ""}" type="button" data-${datasetName}="${escapeHtml(option)}">
+          ${escapeHtml(labelFormatter(option))}
+        </button>
+      `;
+    })
+    .join("");
+
+  container.innerHTML = allButton + optionButtons;
+}
+
+function renderUnitFilterControls() {
+  const options = getSaleFilterOptions();
+
+  renderGeneratedFilterPills(
+    bedroomFilterPills,
+    options.bedrooms,
+    "bedroom-filter",
+    state.bedroomFilter,
+    (value) => `${value} BR`
+  );
+
+  renderGeneratedFilterPills(
+    productCodeFilterPills,
+    options.productCodes,
+    "product-code-filter",
+    state.productCodeFilter,
+    (value) => value
+  );
 }
 
 function getSearchSuggestions() {
@@ -552,39 +634,73 @@ function renderCommunityList() {
       const availability = getClusterAvailability(cluster.name);
       const availabilityLabel = getAvailabilityLabel(availability);
       const isSelected = cluster.id === state.selectedClusterId;
+      const displayTotal = getCommunityDisplayTotal(inventory, availability);
+      const canOpenSaleList = hasActiveUnitFilters(getUnitFilters()) && (availability?.sale?.length || 0) > 0;
 
-      return `
-        <button
-          class="community-item${isSelected ? " is-selected" : ""}"
-          type="button"
-          data-cluster-id="${escapeHtml(cluster.id)}"
-          style="--cluster-color: ${escapeHtml(cluster.color)}"
-        >
-          <span class="community-item-number">${escapeHtml(cluster.number)}</span>
-          <span class="community-item-copy">
-            <strong>${escapeHtml(cluster.name)}</strong>
-            <span>${escapeHtml(getPrimaryCategory(inventory))} &middot; ${escapeHtml(getBedroomLabel(inventory))} &middot; ${escapeHtml(availabilityLabel)}</span>
-          </span>
-          <span class="community-item-total">${escapeHtml(formatNumber(getCommunityDisplayTotal(inventory, availability)))}</span>
-        </button>
-      `;
+return `
+  <div
+    class="community-item${isSelected ? " is-selected" : ""}"
+    style="--cluster-color: ${escapeHtml(cluster.color)}"
+  >
+    <button class="community-item-main" type="button" data-cluster-id="${escapeHtml(cluster.id)}">
+      <span class="community-item-number">${escapeHtml(cluster.number)}</span>
+      <span class="community-item-copy">
+        <strong>${escapeHtml(cluster.name)}</strong>
+        <span>${escapeHtml(getPrimaryCategory(inventory))} &middot; ${escapeHtml(getBedroomLabel(inventory))} &middot; ${escapeHtml(availabilityLabel)}</span>
+      </span>
+    </button>
+
+    ${
+      canOpenSaleList
+        ? `<button
+            class="community-item-total community-sale-count"
+            type="button"
+            data-sale-list-cluster-id="${escapeHtml(cluster.id)}"
+            aria-label="View ${escapeHtml(formatNumber(displayTotal))} available sale units in ${escapeHtml(cluster.name)}"
+          >${escapeHtml(formatNumber(displayTotal))}</button>`
+        : `<span class="community-item-total">${escapeHtml(formatNumber(displayTotal))}</span>`
+    }
+  </div>
+`;
     })
     .join("");
 
-  communityList.querySelectorAll(".community-item").forEach((button) => {
-    button.addEventListener("mouseenter", () => updateHoverState(button.dataset.clusterId));
-    button.addEventListener("mouseleave", () => updateHoverState(null));
-    button.addEventListener("click", () => selectCluster(button.dataset.clusterId));
+  communityList.querySelectorAll(".community-item-main").forEach((button) => {
+  button.addEventListener("mouseenter", () => updateHoverState(button.dataset.clusterId));
+  button.addEventListener("mouseleave", () => updateHoverState(null));
+  button.addEventListener("click", () => selectCluster(button.dataset.clusterId));
+});
+
+communityList.querySelectorAll("[data-sale-list-cluster-id]").forEach((button) => {
+  button.addEventListener("mouseenter", () => updateHoverState(button.dataset.saleListClusterId));
+  button.addEventListener("mouseleave", () => updateHoverState(null));
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const cluster = state.clusters.find((entry) => entry.id === button.dataset.saleListClusterId);
+    renderSaleUnitList(cluster);
   });
+});
 }
 
 function syncUrl() {
   const url = new URL(window.location.href);
 
-  if (state.availabilityFilter !== "all") {
-  url.searchParams.set("availability", state.availabilityFilter);
+  if (state.saleFilter !== "all") {
+  url.searchParams.set("sale", state.saleFilter);
 } else {
-  url.searchParams.delete("availability");
+  url.searchParams.delete("sale");
+}
+
+if (state.bedroomFilter !== "all") {
+  url.searchParams.set("bedrooms", state.bedroomFilter);
+} else {
+  url.searchParams.delete("bedrooms");
+}
+
+if (state.productCodeFilter !== "all") {
+  url.searchParams.set("product", state.productCodeFilter);
+} else {
+  url.searchParams.delete("product");
 }
 
   if (state.selectedClusterId) {
@@ -809,21 +925,26 @@ function applyInitialView() {
   const params = new URLSearchParams(window.location.search);
   const query = params.get("q") || "";
   const propertyFilter = params.get("type") || "all";
-  const availabilityFilter = params.get("availability") || "all";
+  const saleFilter = params.get("sale") || "all";
+  const bedroomFilter = params.get("bedrooms") || "all";
+  const productCodeFilter = params.get("product") || "all";
   const clusterId = params.get("community");
 
   state.query = query;
   communitySearch.value = query;
 
-  if (["all", "sale", "rent"].includes(availabilityFilter)) {
-    state.availabilityFilter = availabilityFilter;
-    document.querySelectorAll("[data-availability-filter]").forEach((button) => {
-      button.classList.toggle(
-        "is-active",
-        button.dataset.availabilityFilter === availabilityFilter
-      );
-    });
-  }
+  if (["all", "available"].includes(saleFilter)) {
+  state.saleFilter = saleFilter;
+  document.querySelectorAll("[data-sale-filter]").forEach((button) => {
+    button.classList.toggle(
+      "is-active",
+      button.dataset.saleFilter === saleFilter
+    );
+  });
+}
+
+state.bedroomFilter = bedroomFilter;
+state.productCodeFilter = productCodeFilter;
 
   if (["all", "Townhouse", "Villa"].includes(propertyFilter)) {
     state.propertyFilter = propertyFilter;
@@ -832,6 +953,7 @@ function applyInitialView() {
     });
   }
 
+  renderUnitFilterControls();
   renderCommunityList();
 
   if (clusterId) {
@@ -921,18 +1043,38 @@ document.querySelectorAll("[data-property-filter]").forEach((button) => {
   });
 });
 
-document.querySelectorAll("[data-availability-filter]").forEach((button) => {
+document.querySelectorAll("[data-sale-filter]").forEach((button) => {
   button.addEventListener("click", () => {
-    document.querySelectorAll("[data-availability-filter]").forEach((pill) => {
+    document.querySelectorAll("[data-sale-filter]").forEach((pill) => {
       pill.classList.remove("is-active");
     });
 
     button.classList.add("is-active");
-    state.availabilityFilter = button.dataset.availabilityFilter;
+    state.saleFilter = button.dataset.saleFilter;
 
     renderCommunityList();
     syncUrl();
   });
 });
+
+function bindGeneratedFilter(container, datasetKey, stateKey) {
+  container?.addEventListener("click", (event) => {
+    const button = event.target.closest(`[data-${datasetKey}]`);
+    if (!button) return;
+
+    container.querySelectorAll(`[data-${datasetKey}]`).forEach((pill) => {
+      pill.classList.remove("is-active");
+    });
+
+    button.classList.add("is-active");
+    state[stateKey] = button.dataset[stateKey];
+
+    renderCommunityList();
+    syncUrl();
+  });
+}
+
+bindGeneratedFilter(bedroomFilterPills, "bedroom-filter", "bedroomFilter");
+bindGeneratedFilter(productCodeFilterPills, "product-code-filter", "productCodeFilter");
 
 initialize();
